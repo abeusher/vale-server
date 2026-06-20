@@ -18,6 +18,7 @@ type Existence struct {
 	// `exceptions` (`array`): An array of strings to be ignored.
 	Exceptions []string
 	exceptRe   *regexp2.Regexp
+	phraseRe   *regexp2.Regexp
 	pattern    *regexp2.Regexp
 	Append     bool
 	IgnoreCase bool
@@ -39,11 +40,18 @@ func NewExistence(cfg *core.Config, generic baseCheck, path string) (Existence, 
 		return rule, err
 	}
 
-	re, err := updateExceptions(rule.Exceptions, cfg.AcceptedTokens, rule.Vocab)
+	// `Vocab` is a list of accepted *words*, so it only makes sense to treat
+	// it as a set of exceptions for word-based rules. For `nonword` rules --
+	// whose tokens match arbitrary spans (e.g. `"[^"]+"[.,]`) -- a vocab word
+	// would suppress any match that merely *contains* it (e.g. `"plugh",`).
+	//
+	// See https://github.com/errata-ai/vale/issues/1058.
+	re, err := updateExceptions(rule.Exceptions, cfg.AcceptedTokens, rule.Vocab && !rule.Nonword)
 	if err != nil {
 		return rule, core.NewE201FromPosition(err.Error(), path, 1)
 	}
 	rule.exceptRe = re
+	rule.phraseRe = buildPhraseRe(rule.Exceptions, cfg.AcceptedTokens, rule.Vocab && !rule.Nonword)
 
 	regex := makeRegexp(
 		cfg.WordTemplate,
@@ -84,7 +92,7 @@ func (e Existence) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Al
 		}
 
 		observed := strings.TrimSpace(converted)
-		if !isMatch(e.exceptRe, observed) {
+		if !isMatch(e.exceptRe, observed) && !withinPhrase(e.phraseRe, blk.Text, loc) {
 			a, erra := makeAlert(e.Definition, loc, blk.Text, cfg)
 			if erra != nil {
 				return alerts, erra

@@ -107,6 +107,15 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 					txt = " " + txt
 				}
 				txt, skip = clean(txt, attr, skip || skipClass, inline)
+				// `clean` prefixes inline content with a space so it doesn't
+				// fuse with the preceding text. When that content directly
+				// follows a tight boundary -- an opening bracket (a link in
+				// parentheses, `([HNSW](...))`, #1056) or a dash
+				// (`Triggers—**Article**`, #1029) -- the space is spurious and
+				// produces false positives like ` —` / `( ACRONYM)`.
+				if strings.HasPrefix(txt, " ") && endsWithTightBoundary(buf) {
+					txt = txt[1:]
+				}
 				buf.WriteString(txt)
 			}
 		}
@@ -222,8 +231,28 @@ func shouldBeSkipped(tagHistory []string, ext string) bool {
 	return false
 }
 
+// endsWithTightBoundary reports whether the buffer ends with a character that
+// binds tightly to what follows -- an opening bracket or a dash -- so inline
+// content placed after it shouldn't be padded with a leading space. Handles
+// "([HNSW](...))" (#1056) and "Triggers—**Article**" (#1029). We decode the
+// last rune because dashes are multi-byte.
+func endsWithTightBoundary(buf *bytes.Buffer) bool {
+	r, _ := utf8.DecodeLastRune(buf.Bytes())
+	switch r {
+	case '(', '[', '{', '—', '–':
+		return true
+	default:
+		return false
+	}
+}
+
 func clean(txt, attr string, skip, inline bool) (string, bool) {
-	punct := []string{".", "?", "!", ",", ":", ";"}
+	// Closing brackets are included so that inline content immediately
+	// followed by one (e.g., a link inside parentheses) doesn't get a spurious
+	// space inserted before it -- "(HNSW)" rather than "(HNSW )" (#1056). Dashes
+	// are included so text like "—This" right after a link isn't padded to
+	// " —This" (#1029).
+	punct := []string{".", "?", "!", ",", ":", ";", ")", "]", "}", "—", "–"}
 	first, _ := utf8.DecodeRuneInString(txt)
 	starter := core.StringInSlice(string(first), punct) && !skip
 

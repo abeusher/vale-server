@@ -34,19 +34,26 @@ type walker struct {
 
 	begin int
 	end   int
+
+	// ext holds the file extension of the current file.
+	ext string
 }
 
 func newWalker(f *core.File, raw []byte, offset int) *walker {
 	return &walker{
-		lines:   len(f.Lines) + offset,
-		context: string2ByteSlice(f.Content),
-		z:       html.NewTokenizer(bytes.NewReader(raw))}
+		lines: len(f.Lines) + offset,
+		// We keep a private, writable copy of the content so that `sub` can
+		// overwrite already-processed segments in place. We must not alias
+		// `f.Content` here: its backing array may be read-only (e.g., a
+		// compile-time constant), and writing to it crashes (see #1099).
+		context: []byte(f.Content),
+		z:       html.NewTokenizer(bytes.NewReader(raw)),
+		ext:     f.NormedExt,
+	}
 }
 
 func (w *walker) sub(sub string, char rune) bool {
-	s, found := subInplace(w.getCtx(), sub, char)
-	w.context = string2ByteSlice(s)
-	return found
+	return subInplace(w.context, sub, char)
 }
 
 func (w *walker) update(txt string, tokt html.TokenType) {
@@ -137,10 +144,20 @@ func (w *walker) walk() (html.TokenType, html.Token, string) {
 
 func (w *walker) replaceToks(tok html.Token) {
 	tags := core.StringInSlice(tok.Data, []string{
-		"img", "a", "p", "script", "h1", "h2", "h3", "h4", "h5", "h6"})
+		"img", "a", "p", "script", "h1", "h2", "h3", "h4", "h5", "h6", "span"})
 	if tags {
+		names := []string{"href", "id", "src", "alt"}
+		if w.ext == ".html" {
+			// We need to handle cases in which inline tags include `class` attributes, which may
+			// contain substrings that match our actual findings. The challenge is that many of our
+			// supported formats inject these *after* converting to HTML, so we can't find them in
+			// the original text.
+			//
+			// See testdata/fixtures/patterns/{test2.rst, test3.html} for examples.
+			names = append(names, "class")
+		}
 		for _, a := range tok.Attr {
-			if core.StringInSlice(a.Key, []string{"href", "id", "src", "alt"}) {
+			if core.StringInSlice(a.Key, names) {
 				if a.Key == "href" {
 					a.Val, _ = url.QueryUnescape(a.Val)
 				}
@@ -206,13 +223,6 @@ func (w *walker) isNestedList() bool {
 	return false
 }
 
-func string2ByteSlice(str string) []byte {
-	if str == "" {
-		return nil
-	}
-	return unsafe.Slice(unsafe.StringData(str), len(str))
-}
-
 func byteSlice2String(bs []byte) string {
 	if len(bs) == 0 {
 		return ""
@@ -220,25 +230,27 @@ func byteSlice2String(bs []byte) string {
 	return unsafe.String(unsafe.SliceData(bs), len(bs))
 }
 
-func subInplace(ctx, sub string, char rune) (string, bool) {
-	idx := strings.Index(ctx, sub)
+// subInplace masks the first occurrence of `sub` in `ctx` by overwriting each
+// of its single-byte runes with `char`, mutating `ctx` directly.
+//
+// The replacement is length-preserving: single-byte runes (other than '\n')
+// become `char`, while multi-byte runes and newlines are left untouched. Since
+// no bytes are added or removed, positions in `ctx` remain stable -- which is
+// the whole point of masking already-processed text rather than removing it.
+//
+// `ctx` must be a writable buffer owned by the caller; see newWalker.
+func subInplace(ctx []byte, sub string, char rune) bool {
+	idx := strings.Index(byteSlice2String(ctx), sub)
 	if idx < 0 {
-		return ctx, false
+		return false
 	}
 
-	bss := string2ByteSlice(sub)
-	btx := string2ByteSlice(ctx)
-
-	repl := bytes.Map(func(r rune) rune {
+	mask := byte(char)
+	for _, r := range sub {
 		if r != '\n' && utf8.RuneLen(r) == 1 {
-			return char
+			ctx[idx] = mask
 		}
-		return r
-	}, bss)
-
-	p1 := btx[:idx]
-	p2 := btx[idx+len(sub):]
-
-	btx = append(append(p1, repl...), p2...)
-	return byteSlice2String(btx), true
+		idx += utf8.RuneLen(r)
+	}
+	return true
 }

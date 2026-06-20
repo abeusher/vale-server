@@ -15,6 +15,14 @@ Feature: Misc
             test.md:32:8:Vale.Terms:Use '[Oo]bservability' instead of 'oBservability'.
             """
 
+    Scenario: Vocab does not suppress nonword rules (#1058)
+        When I use Vocab "Nonword"
+        Then the output should contain exactly:
+            """
+            test.md:1:18:Bug.Quotes:Commas and periods go inside quotation marks.
+            test.md:3:27:Bug.Quotes:Commas and periods go inside quotation marks.
+            """
+
     Scenario: Multiple Vocabs
         When I use Vocab "Multi"
         Then the output should contain exactly:
@@ -26,6 +34,17 @@ Feature: Misc
             test.md:15:5:Vale.Terms:Use 'MyProduct' instead of 'Myproduct'.
             test.md:17:5:Vale.Terms:Use 'MyProduct Enterprise' instead of 'Myproduct enterprise'.
             test.md:19:5:Vale.Terms:Use 'MyProduct Enterprise' instead of 'MyProduct enterprise'.
+            """
+
+    Scenario: Multi-word vocab phrases (#1035)
+        # An accepted phrase is exempt across every Vocab-aware rule (here both
+        # Vale.Spelling and a custom existence rule), while its component words
+        # are still flagged on their own.
+        When I use Vocab "Phrases"
+        Then the output should contain exactly:
+            """
+            test.md:3:8:Test.Place:Avoid 'place'.
+            test.md:5:3:Vale.Spelling:Did you really mean 'flooberg'?
             """
 
     Scenario: Line Endings
@@ -91,6 +110,15 @@ Feature: Misc
             """
             test.md:4:1:Markup.Repetition:"in" is repeated.
             test.md:50:11:Markup.SentSpacing:"d.A" must contain one and only one space.
+            """
+
+    Scenario: Dashes adjacent to inline markup (#1029)
+        # A dash touching a link/bold (`[x](y)—z`, `**x**—z`, `x—**y**`) must not
+        # gain a spurious surrounding space; a genuinely spaced dash still does.
+        When I test "misc/dashes"
+        Then the output should contain exactly:
+            """
+            test.md:1:24:Test.Dashes:Remove the spaces around the dash.
             """
 
     Scenario: Spelling

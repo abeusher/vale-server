@@ -3,7 +3,7 @@ Feature: Checks
         When I test "checks/Script"
         Then the output should contain exactly:
             """
-            test.md:4:19:Scripts.CustomMsg:Some message
+            test.md:1:2:Scripts.CustomMsg:Some message
             test.md:29:1:Checks.ScriptRE:Consider inserting a new section heading at this point.
             test.md:39:1:Checks.ScriptRE:Consider inserting a new section heading at this point.
             """
@@ -22,13 +22,22 @@ Feature: Checks
             test.md:9:5:Checks.MultiCapture:'NFL' has no definition
             """
 
+    Scenario: Conditional presence check (#1048)
+        # When `second` has no capture group, the rule just requires `second` to
+        # be present whenever `first` is -- so only the file missing it flags.
+        When I test "checks/ConditionalPresence"
+        Then the output should contain exactly:
+            """
+            missing.md:1:3:Test.Presence:A 'Section' requires a 'Summary:' line.
+            """
+
     Scenario: Occurrence
         When I test "checks/Occurrence"
         Then the output should contain exactly:
             """
             test.md:1:1:demo.ZeroOccurrence:No intro
-            test.md:1:3:demo.MinCount:Content too short.
-            test2.md:1:3:demo.MinCount:Content too short.
+            test.md:1:3:demo.MinCount:Content too short (1).
+            test2.md:1:3:demo.MinCount:Content too short (3).
             test3.md:7:37:demo.CharCount:Topic titles should use fewer than 70 characters.
             test3.md:11:4:demo.CharCount:Topic titles should use fewer than 70 characters.
             test3.md:27:6:demo.CharCount:Topic titles should use fewer than 70 characters.
@@ -110,6 +119,8 @@ Feature: Checks
             test.md:25:1:Bugs.SameCase:Use 'MPL 2.0' instead of 'mpl 2.0'
             test.md:27:1:Bugs.SameCase:Use 'MPL 2.0' instead of 'MPL2.0'
             test.md:31:15:Bugs.EmptyReplace:Use  instead of 'obvious'.
+            test.md:33:4:Bugs.Commas:Use a single comma or an ellipsis, not multiple consecutive commas.
+            test.md:33:23:Bugs.Commas:Use a single comma or an ellipsis, not multiple consecutive commas.
             test2.md:3:1:demo.CapSub:Use 'Change to the `/etc` directory' instead of 'Change into the `/etc` directory'.
             test2.md:7:1:demo.CapSub:Use 'Change to the `/home/user` directory' instead of 'Change into the `/home/user` directory'.
             test2.md:9:1:demo.CapSub:Use 'Change to the `/etc/X11` directory' instead of 'Change into the `/etc/X11` directory'.
