@@ -239,7 +239,14 @@ func (l *Linter) lintFile(src string) lintResult {
 
 	// Determine what NLP tasks this particular file needs; the goal is to do
 	// the least amount of work possible.
+	//
+	// The manager knows what some rule in the run asks for; this file pays
+	// only for what a rule that runs on it asks for. A section that turns
+	// the one sentence-scoped rule off, or gives it a level below the
+	// minimum, should not have its files segmented for nothing.
 	file.NLP = l.Manager.AssignNLP(file)
+	file.NLP.Segmentation = file.NLP.Segmentation && l.runsScoped(file, "sentence")
+	file.NLP.Splitting = file.NLP.Splitting && l.runsScoped(file, "paragraph")
 	simple := l.Manager.Config.Flags.Simple
 
 	// NOTE: This is a sanity check to ensure that we don't run any checks that
@@ -571,6 +578,19 @@ func (l *Linter) inScopeFor(blk nlp.Block) []scopedRule {
 	}
 
 	return found
+}
+
+// runsScoped reports whether any rule scoped to the `scope` family of blocks
+// will run on f.
+func (l *Linter) runsScoped(f *core.File, scope string) bool {
+	rules := l.Manager.Rules()
+	for _, name := range l.Manager.RulesForScope(scope) {
+		// A `--filter` removes rules after they were registered.
+		if chk, ok := rules[name]; ok && l.shouldRun(name, f, chk) {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Linter) shouldRun(name string, f *core.File, chk check.Rule) bool {

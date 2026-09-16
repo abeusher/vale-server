@@ -25,6 +25,7 @@ type Manager struct {
 	Config *core.Config
 
 	scopes       map[string]struct{}
+	scopeRules   map[string][]string
 	docs         map[string]cascadia.Sel
 	rules        map[string]Rule
 	styles       []string
@@ -39,9 +40,10 @@ func NewManager(config *core.Config) (*Manager, error) {
 	mgr := Manager{
 		Config: config,
 
-		rules:  make(map[string]Rule),
-		scopes: make(map[string]struct{}),
-		docs:   make(map[string]cascadia.Sel),
+		rules:      make(map[string]Rule),
+		scopes:     make(map[string]struct{}),
+		scopeRules: make(map[string][]string),
+		docs:       make(map[string]cascadia.Sel),
 	}
 
 	// TODO: Should we only load these if we're using them?
@@ -154,6 +156,13 @@ func (mgr *Manager) Selections() []Selection {
 func (mgr *Manager) HasScope(scope string) bool {
 	_, found := mgr.scopes[scope]
 	return found
+}
+
+// RulesForScope names the rules whose scope asks for the `scope` family of
+// blocks -- `sentence`, `paragraph` -- so that a file is only segmented into
+// them when one of those rules will run on it.
+func (mgr *Manager) RulesForScope(scope string) []string {
+	return mgr.scopeRules[scope]
 }
 
 // NeedsTagging indicates if POS tagging is needed.
@@ -410,6 +419,9 @@ func (mgr *Manager) registerCheck(chkName string, rule Rule, taggedPOS bool) err
 	for _, s := range rule.Fields().Scope {
 		for _, base := range scopeBases(s) {
 			mgr.scopes[base] = struct{}{}
+			if !core.StringInSlice(chkName, mgr.scopeRules[base]) {
+				mgr.scopeRules[base] = append(mgr.scopeRules[base], chkName)
+			}
 		}
 		for id, sel := range DocSelectors(s) {
 			if _, seen := mgr.docs[id]; seen {

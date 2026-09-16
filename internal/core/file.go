@@ -284,15 +284,15 @@ func (f *File) SortedAlerts() []Alert {
 
 // ComputeMetrics returns all of f's metrics.
 func (f *File) ComputeMetrics() (map[string]interface{}, error) {
-	return BlockMetrics(f.Summary.String(), f.Metrics), nil
+	return BlockMetrics(summarize.NewDocument(f.Summary.String()), f.Metrics), nil
 }
 
 // BlockMetrics computes the metrics of one block: the counts derived from its
-// text, plus the elements it holds. Empty when the text has no words.
-func BlockMetrics(text string, counts map[string]int) map[string]interface{} {
+// text, as doc summarizes it, plus the elements it holds. Empty when the text
+// has no words.
+func BlockMetrics(doc *summarize.Document, counts map[string]int) map[string]interface{} {
 	params := map[string]interface{}{}
 
-	doc := summarize.NewDocument(text)
 	if doc.NumWords == 0 {
 		return params
 	}

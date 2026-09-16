@@ -72,7 +72,7 @@ func (o Metric) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert, 
 	ctx, cancel := context.WithTimeout(context.Background(), tengoTimeout)
 	defer cancel()
 
-	parameters := core.BlockMetrics(blk.Text, blk.Metrics)
+	parameters := core.BlockMetrics(blk.Summarize(), blk.Metrics)
 	if len(parameters) == 0 {
 		// empty file.
 		return alerts, nil

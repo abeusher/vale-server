@@ -3,8 +3,6 @@ package check
 import (
 	"fmt"
 
-	"github.com/jdkato/prose/v3/summarize"
-
 	"github.com/vale-cli/vale/v3/internal/core"
 	"github.com/vale-cli/vale/v3/internal/nlp"
 )
@@ -44,7 +42,7 @@ func (o Readability) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Al
 	var grade float64
 	var alerts []core.Alert
 
-	doc := summarize.NewDocument(blk.Text)
+	doc := blk.Summarize()
 
 	if core.StringInSlice("SMOG", o.Metrics) {
 		grade += doc.SMOG()

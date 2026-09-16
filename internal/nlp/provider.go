@@ -2,6 +2,9 @@ package nlp
 
 import (
 	"strings"
+	"sync"
+
+	"github.com/jdkato/prose/v3/summarize"
 )
 
 type segmenter func(string) []string
@@ -48,6 +51,33 @@ type Block struct {
 
 	// runes converts positions in Text from runes to bytes; see ByteSpan.
 	runes *runeIndex
+
+	// summary holds the block's document statistics once a rule has asked
+	// for them; see Summarize.
+	summary *summaryCache
+}
+
+// summaryCache builds a block's summarize.Document once. A pointer on the
+// block, so every copy of it shares the result.
+type summaryCache struct {
+	once sync.Once
+	doc  *summarize.Document
+}
+
+// Summarize returns the block's document statistics -- its sentence, word,
+// and syllable counts -- computing them on the first call and returning the
+// same document after that. A `readability` rule and a `metric` rule both
+// read them, and a style ships several of each, so the block is segmented
+// and counted once rather than once per rule. Safe to call concurrently.
+func (b *Block) Summarize() *summarize.Document {
+	if b.summary == nil {
+		// A block built without NewBlock has nowhere to keep the result.
+		return summarize.NewDocument(b.Text)
+	}
+	b.summary.once.Do(func() {
+		b.summary.doc = summarize.NewDocument(b.Text)
+	})
+	return b.summary.doc
 }
 
 // A Run is a piece of a block's text and where it came from: At indexes the
@@ -112,7 +142,8 @@ func NewLinedBlock(ctx, txt, sel string, line int) Block {
 		Parent:  sel,
 		Line:    line,
 		Offset:  offset,
-		runes:   &runeIndex{text: txt}}
+		runes:   &runeIndex{text: txt},
+		summary: &summaryCache{}}
 }
 
 // at returns a copy of blk positioned at the given offset within its context.
