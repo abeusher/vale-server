@@ -53,6 +53,8 @@ func TestInsideInlineMarkup(t *testing.T) {
 			[]int{5, 8}, false},
 		{"prose occurrence after math", "x $ZQX$ and ZQX y",
 			[]int{12, 15}, false},
+		{"closing backtick past a multi-byte prefix", "éééééééé x ZQX.` y",
+			[]int{19, 22}, true},
 	}
 
 	for _, c := range cases {

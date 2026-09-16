@@ -143,13 +143,11 @@ func quoteTolerantPattern(s string) string {
 // NOTE: This is a workaround for #673. Ideally we'd handle it at the AST level
 // by ignoring inline code spans.
 func insideInlineMarkup(ctx string, fs []int) bool {
-	size := nlp.StrLen(ctx)
-
 	start := fs[0] - 1
 	end := fs[1] + 1
 	if start > 0 && (ctx[start] == '`' || ctx[start] == '-') {
 		return true
-	} else if end < size && (ctx[end] == '`' || ctx[end] == '-') &&
+	} else if end < len(ctx) && (ctx[end] == '`' || ctx[end] == '-') &&
 		!unicode.IsSpace(rune(ctx[fs[1]])) {
 		// `end` looks one past the character beside the match, catching a
 		// closing backtick separated by punctuation (`foo word.`). When the
