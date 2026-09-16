@@ -28,6 +28,9 @@ type goSpell struct {
 
 	// segments holds the words a compound may be built from, and where.
 	segments map[string]segment
+	// noCompound holds the entries COMPOUNDFORBIDFLAG keeps out, whatever
+	// their other forms allow.
+	noCompound map[string]struct{}
 	// pairs holds the run-together form of each two-word entry, which is
 	// not a compound.
 	pairs map[string]struct{}
@@ -41,6 +44,11 @@ type goSpell struct {
 	checkTriple bool // CHECKCOMPOUNDTRIPLE
 	simplified  bool // SIMPLIFIEDTRIPLE
 	checkCase   bool // CHECKCOMPOUNDCASE
+	checkRep    bool // CHECKCOMPOUNDREP
+	wordMax     int  // COMPOUNDWORDMAX, or 0
+	syllableMax int  // COMPOUNDSYLLABLE, or 0
+	vowels      string
+	reps        [][2]string
 	patterns    []compoundPattern
 	breaks      []breakRule
 	ignored     []string // .aff directives the reader does not implement
@@ -325,22 +333,18 @@ func (s *goSpell) breakParts(word string, depth int) bool {
 	return false
 }
 
-// segment returns what a compound may use word as, trying its exact,
-// lower-cased, and capitalized forms: a German compound writes interior
-// nouns lower-case, while the dictionary stores them capitalized.
+// segment returns what a compound may use word as. The case is the
+// dictionary's to handle: a German dictionary generates the lower-case
+// interior forms itself, with prefix rules that strip the capital.
 func (s *goSpell) segment(word string) (segment, bool) {
-	if seg, ok := s.segments[word]; ok {
-		return seg, true
-	}
-	if seg, ok := s.segments[strings.ToLower(word)]; ok {
-		return seg, true
-	}
-	seg, ok := s.segments[capitalize(word)]
+	seg, ok := s.segments[word]
 	return seg, ok
 }
 
 // isCompound reports whether word is built from segments the dictionary's
-// compound flags allow, for dictionaries that enable flag compounding.
+// compound flags allow, for dictionaries that enable flag compounding. The
+// word is tried as written and, as Hunspell does, in the case forms a
+// capitalized or upper-cased word may stand for.
 func (s *goSpell) isCompound(word string) bool {
 	if !s.canCompound {
 		return false
@@ -350,16 +354,32 @@ func (s *goSpell) isCompound(word string) bool {
 	}
 	// Bound the work: very long inputs are unlikely to be real words and the
 	// recursion is super-linear.
-	if r := []rune(word); len(r) <= 100 {
-		return s.compoundParts(r, word, nil, nil, 0)
+	if len([]rune(word)) > 100 {
+		return false
+	}
+
+	forms := []string{word}
+	lower := strings.ToLower(word)
+	switch {
+	case allUpper(word):
+		forms = append(forms, lower, capitalize(lower))
+	case initialUpper(word):
+		forms = append(forms, lower)
+	}
+	for _, form := range forms {
+		if s.compoundParts([]rune(form), word, nil, nil, 0) {
+			return true
+		}
 	}
 	return false
 }
 
-// piece is a segment of a compound as written, with what it may do.
+// piece is a segment of a compound as written, with what it may do, and
+// the compound so far, up to and including it.
 type piece struct {
-	text string
-	use  segment
+	text  string
+	use   segment
+	sofar string
 }
 
 // compoundParts reports whether runes split into segments allowed at their
@@ -367,6 +387,12 @@ type piece struct {
 // replacement they follow, if any; word is the whole word, for FORCEUCASE.
 func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *compoundPattern, depth int) bool {
 	if depth > 4 { // cap the number of segments
+		return false
+	}
+	// Past COMPOUNDWORDMAX segments, only a short compound goes on: Hungarian
+	// allows three parts in six syllables.
+	if s.wordMax > 0 && depth+2 > s.wordMax &&
+		(s.syllableMax == 0 || s.syllables(word) > s.syllableMax) {
 		return false
 	}
 	minLen := max(s.compoundMin, 1)
@@ -429,14 +455,18 @@ func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece
 		(next.stemOnly && use.affixed)) {
 		return false
 	}
-	cur := &piece{text: seg, use: use}
-	if prev != nil && s.patternForbids(prev, cur) {
-		return false
+	cur := &piece{text: seg, use: use, sofar: seg}
+	if prev != nil {
+		cur.sofar = prev.sofar + seg
+		if s.patternForbids(prev, cur) || s.repMakesWord(prev.text+seg, cur.sofar) {
+			return false
+		}
 	}
 
 	last := string(rest)
 	if end, isEnd := s.segment(last); isEnd && end.end &&
-		!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) {
+		!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) &&
+		!s.repMakesWord(seg+last, cur.sofar+last) {
 		if next != nil {
 			// Hunspell forbids a duplicate only at the end: foofoobar is
 			// fine, foobarbar is not.
@@ -447,6 +477,42 @@ func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece
 		}
 	}
 	return s.compoundParts(rest, word, cur, next, depth+1)
+}
+
+// repMakesWord reports whether CHECKCOMPOUNDREP forbids a compound: one REP
+// substitution turns a run of its segments into a dictionary word, so the
+// compound is more likely a typo of that word.
+func (s *goSpell) repMakesWord(texts ...string) bool {
+	if !s.checkRep {
+		return false
+	}
+	for _, text := range texts {
+		for _, rep := range s.reps {
+			for at := strings.Index(text, rep[0]); at >= 0; {
+				candidate := text[:at] + rep[1] + text[at+len(rep[0]):]
+				if _, ok := s.dict[candidate]; ok {
+					return true
+				}
+				next := strings.Index(text[at+1:], rep[0])
+				if next < 0 {
+					break
+				}
+				at += 1 + next
+			}
+		}
+	}
+	return false
+}
+
+// syllables counts the COMPOUNDSYLLABLE vowels in word.
+func (s *goSpell) syllables(word string) int {
+	n := 0
+	for _, r := range word {
+		if strings.ContainsRune(s.vowels, r) {
+			n++
+		}
+	}
+	return n
 }
 
 // patternForbids reports whether a CHECKCOMPOUNDPATTERN forbids writing
@@ -528,11 +594,17 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		checkTriple: affix.CheckCompoundTriple,
 		simplified:  affix.SimplifiedTriple,
 		checkCase:   affix.CheckCompoundCase,
+		checkRep:    affix.CheckCompoundRep,
+		wordMax:     affix.CompoundWordMax,
+		syllableMax: affix.CompoundSyllable,
+		vowels:      affix.CompoundVowels,
+		reps:        affix.Replacements,
 		patterns:    affix.CompoundPatterns,
 		breaks:      newBreakRules(affix.Break),
 		ignored:     affix.Ignored,
 		forbidden:   make(map[string]struct{}),
 		segments:    make(map[string]segment),
+		noCompound:  make(map[string]struct{}),
 		pairs:       make(map[string]struct{}),
 	}
 	if !affix.BreakDeclared {
@@ -602,7 +674,13 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 					gs.dict[f.Word] = struct{}{}
 				}
 				if seg, ok := affix.compoundUse(f); ok {
+					if have, known := gs.segments[f.Word]; known {
+						seg = have.merge(seg)
+					}
 					gs.segments[f.Word] = seg
+				} else if f.prefix == nil && f.suffix == nil &&
+					hasFlag(f.Flags, affix.CompoundForbidFlag) {
+					gs.noCompound[f.Word] = struct{}{}
 				}
 			}
 		}
@@ -612,6 +690,10 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 
 	if err = scanner.Err(); err != nil {
 		return nil, err
+	}
+
+	for word := range gs.noCompound {
+		delete(gs.segments, word)
 	}
 
 	// A forbidden word overrides any entry that generates it.

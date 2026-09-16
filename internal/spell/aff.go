@@ -33,6 +33,19 @@ type entryForm struct {
 
 	prefix, suffix *rule    // nil when none was applied
 	cont           []string // the flags of the rule that built it
+
+	// wantsAffix is set by NEEDAFFIX on the stem or a rule; plainAffix by
+	// a rule without it, which satisfies the want.
+	wantsAffix, plainAffix bool
+
+	// open is the affix type of a CIRCUMFIX rule still waiting for its
+	// partner of the other type.
+	open *affixType
+}
+
+// virtual reports whether f is only a step toward another form.
+func (f entryForm) virtual() bool {
+	return f.open != nil || (f.wantsAffix && !f.plainAffix)
 }
 
 // derive applies the affix's rules to base, one form per rule that matches.
@@ -49,10 +62,26 @@ func (a dictConfig) derive(af affix, base entryForm) []entryForm {
 			f.cont = a.parseFlags(r.Cont)
 			f.Flags = union(base.Flags, f.cont)
 		}
+		if hasFlag(f.cont, a.NeedAffixFlag) {
+			f.wantsAffix = true
+		} else {
+			f.plainAffix = true
+		}
+		if hasFlag(f.cont, a.CircumfixFlag) {
+			if base.open != nil && *base.open != af.Type {
+				f.open = nil // paired
+			} else {
+				kind := af.Type
+				f.open = &kind
+			}
+		}
 		if af.Type == Prefix {
-			f.Word = r.AffixText + base.Word
+			stripped := base.Word
+			if r.Strip != "" && strings.HasPrefix(stripped, r.Strip) {
+				stripped = stripped[len(r.Strip):]
+			}
+			f.Word = r.AffixText + stripped
 			f.prefix = r
-			// TODO is does Strip apply to prefixes too?
 		} else {
 			stripped := base.Word
 			if r.Strip != "" && strings.HasSuffix(stripped, r.Strip) {
@@ -139,7 +168,14 @@ type dictConfig struct {
 	CheckCompoundTriple bool // CHECKCOMPOUNDTRIPLE: no letter three times at a boundary
 	SimplifiedTriple    bool // SIMPLIFIEDTRIPLE: a triple may be written as a double
 	CheckCompoundCase   bool // CHECKCOMPOUNDCASE: no upper-case letter at a boundary
-	CompoundPatterns    []compoundPattern
+	CheckCompoundRep    bool // CHECKCOMPOUNDREP: no compound a REP entry turns into a word
+	CompoundWordMax     int  // COMPOUNDWORDMAX: segments a compound may have; 0 is no limit
+
+	// COMPOUNDSYLLABLE: a compound of more segments than COMPOUNDWORDMAX is
+	// allowed when it has no more syllables than this, counted as vowels.
+	CompoundSyllable int
+	CompoundVowels   string
+	CompoundPatterns []compoundPattern
 
 	// Ignored names the directives the file used that this reader does not
 	// implement, in the order they were first seen.
@@ -218,15 +254,16 @@ func (a dictConfig) expandEntry(entry string) ([]entryForm, error) {
 		}
 	}
 
-	stem := entryForm{Word: word, Flags: flags, cont: flags}
+	stem := entryForm{Word: word, Flags: flags, cont: flags,
+		wantsAffix: hasFlag(flags, a.NeedAffixFlag)}
 	return a.emit(stem, 0), nil
 }
 
-// emit returns f, unless its own flags say it needs an affix, and then the
-// forms the affixes those flags name build on it.
+// emit returns f, unless it is only a step toward another form, and then
+// the forms the affixes its flags name build on it.
 func (a dictConfig) emit(f entryForm, depth int) []entryForm {
 	var out []entryForm
-	if !hasFlag(f.cont, a.NeedAffixFlag) {
+	if !f.virtual() {
 		out = append(out, f)
 	}
 	if depth > maxAffixDepth {
@@ -246,7 +283,7 @@ func (a dictConfig) affixed(base entryForm, keys []string, depth int) []entryFor
 			continue
 		}
 		if !af.CrossProduct {
-			out = a.emitAll(a.alone(a.derive(af, base)), out, depth)
+			out = a.emitAll(a.derive(af, base), out, depth)
 			continue
 		}
 		if af.Type == Prefix {
@@ -257,16 +294,16 @@ func (a dictConfig) affixed(base entryForm, keys []string, depth int) []entryFor
 	}
 
 	for _, suf := range suffixes {
-		out = a.emitAll(a.alone(a.derive(suf, base)), out, depth)
+		out = a.emitAll(a.derive(suf, base), out, depth)
 	}
 	for _, pre := range prefixes {
 		prefixed := a.derive(pre, base)
-		out = a.emitAll(a.alone(prefixed), out, depth)
+		out = a.emitAll(prefixed, out, depth)
 
 		// now do cross product
 		for _, suf := range suffixes {
 			for _, pw := range prefixed {
-				out = a.emitAll(a.paired(pw, a.derive(suf, pw)), out, depth)
+				out = a.emitAll(a.derive(suf, pw), out, depth)
 			}
 		}
 	}
@@ -284,41 +321,6 @@ func (a dictConfig) emitAll(forms []entryForm, out []entryForm, depth int) []ent
 	return out
 }
 
-// circumfix reports whether a form's rule carries the CIRCUMFIX flag.
-func (a dictConfig) circumfix(f entryForm) bool {
-	return hasFlag(f.cont, a.CircumfixFlag)
-}
-
-// alone drops the forms that need a partner, when the affix is used by itself.
-func (a dictConfig) alone(forms []entryForm) []entryForm {
-	if a.CircumfixFlag == "" {
-		return forms
-	}
-	kept := make([]entryForm, 0, len(forms))
-	for _, f := range forms {
-		if !a.circumfix(f) {
-			kept = append(kept, f)
-		}
-	}
-	return kept
-}
-
-// paired keeps the suffixed forms of a prefixed word whose two halves agree
-// on CIRCUMFIX: both carry it, or neither does.
-func (a dictConfig) paired(pre entryForm, forms []entryForm) []entryForm {
-	if a.CircumfixFlag == "" {
-		return forms
-	}
-	want := a.circumfix(pre)
-	kept := make([]entryForm, 0, len(forms))
-	for _, f := range forms {
-		if a.circumfix(f) == want {
-			kept = append(kept, f)
-		}
-	}
-	return kept
-}
-
 // maxAffixDepth bounds how many times a continuation class may be followed.
 //
 // Hunspell's default is twofold affixation -- one continuation -- and this
@@ -333,6 +335,16 @@ type segment struct {
 	upper              bool     // FORCEUCASE: a compound ending here is capitalized
 	affixed            bool     // built with an affix, which a `0` pattern excludes
 	flags              []string // for the flags a CHECKCOMPOUNDPATTERN names
+}
+
+// merge combines what two forms of the same word may do.
+func (s segment) merge(o segment) segment {
+	return segment{
+		begin: s.begin || o.begin, middle: s.middle || o.middle, end: s.end || o.end,
+		upper:   s.upper || o.upper,
+		affixed: s.affixed && o.affixed,
+		flags:   union(s.flags, o.flags),
+	}
 }
 
 // compoundUse reports whether f may be a compound segment, and where.
@@ -358,8 +370,10 @@ func (a dictConfig) compoundUse(f entryForm) (segment, bool) {
 		if !hasFlag(cont, a.CompoundPermitFlag) {
 			seg.begin, seg.middle = false, false
 		}
-		// A suffix only for compounds, a German Fuge-s, is never last.
-		if hasFlag(cont, a.CompoundOnly) {
+		// A suffix only for compounds, a Fuge-s, ends a compound only if
+		// it says so itself.
+		if hasFlag(cont, a.CompoundOnly) &&
+			!hasFlag(cont, a.CompoundFlag) && !hasFlag(cont, a.CompoundEnd) {
 			seg.end = false
 		}
 	}
@@ -545,6 +559,21 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			aff.SimplifiedTriple = true
 		case "CHECKCOMPOUNDCASE":
 			aff.CheckCompoundCase = true
+		case "CHECKCOMPOUNDREP":
+			aff.CheckCompoundRep = true
+		case "COMPOUNDWORDMAX":
+			if len(parts) >= 2 {
+				if val, err := strconv.Atoi(parts[1]); err == nil && val > 0 {
+					aff.CompoundWordMax = val
+				}
+			}
+		case "COMPOUNDSYLLABLE":
+			if len(parts) >= 3 {
+				if val, err := strconv.Atoi(parts[1]); err == nil && val > 0 {
+					aff.CompoundSyllable = val
+					aff.CompoundVowels = parts[2]
+				}
+			}
 		case "CHECKCOMPOUNDPATTERN":
 			// The first line is a count.
 			if len(parts) == 2 && allDigits(parts[1]) {
@@ -685,9 +714,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				//
 				// TODO: Is this safe to do in all cases?
 				affixText, cont := parts[3], ""
-				if affixText == "0" {
-					affixText = ""
-				} else if text, flags, found := strings.Cut(affixText, "/"); found {
+				if text, flags, found := strings.Cut(affixText, "/"); found {
 					// Split off the affix's own continuation flags, e.g. the
 					// "/34,22" in `SFX 1 0 t/34,22 e`. Left in place they would
 					// be appended to the generated word ("stavet/34,22"), so
@@ -698,6 +725,10 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 					// is how Hunspell builds a word like `stavets` from
 					// `stave` in two steps. See expand.
 					affixText, cont = text, flags
+				}
+				if affixText == "0" {
+					// A zero affix, which may still carry flags: `0/UPX`.
+					affixText = ""
 				}
 
 				a.Rules = append(a.Rules, rule{

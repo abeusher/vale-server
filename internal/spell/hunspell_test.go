@@ -16,13 +16,9 @@ import (
 // the directive or behavior each one needs. A fixture that starts passing
 // fails the run until it is removed from here, so the list stays honest.
 var hunspellUnsupported = map[string]string{
-	"compoundforbid":             "compound position flags (COMPOUNDBEGIN/MIDDLE/END, COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG)",
-	"germancompounding":          "compound position flags (COMPOUNDBEGIN/MIDDLE/END, COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG)",
-	"germancompoundingold":       "compound position flags (COMPOUNDBEGIN/MIDDLE/END, COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG)",
-	"hu":                         "compound position flags (COMPOUNDBEGIN/MIDDLE/END, COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG)",
-	"limit-multiple-compounding": "compound position flags (COMPOUNDBEGIN/MIDDLE/END, COMPOUNDPERMITFLAG, COMPOUNDFORBIDFLAG)",
+	"hu":                         "a hyphenated compound whose left part is forbidden on its own",
+	"limit-multiple-compounding": "a three-part compound one edit from a dictionary word",
 	"opentaal_cpdpat2":           "CHECKCOMPOUNDPATTERN",
-	"checkcompoundrep":           "CHECKCOMPOUNDREP",
 	"compoundrule2":              "COMPOUNDRULE with repeated and numeric elements",
 	"compoundrule3":              "COMPOUNDRULE with repeated and numeric elements",
 	"compoundrule4":              "COMPOUNDRULE with repeated and numeric elements",
@@ -52,13 +48,10 @@ var hunspellUnsupported = map[string]string{
 	"ignoreutf":                  "IGNORE",
 	"nepali":                     "IGNORE",
 	"right_to_left_mark":         "IGNORE",
-	"1975530":                    "IGNORE",
 	"gh353":                      "non-ASCII digits",
 	"flagutf8":                   "FLAG UTF-8 affix headers",
 	"fullstrip":                  "FULLSTRIP",
 	"gh1044":                     "FULLSTRIP",
-	"circumfix":                  "prefix stacking under CIRCUMFIX and NEEDAFFIX",
-	"needaffix5":                 "prefix stacking under CIRCUMFIX and NEEDAFFIX",
 	"gh1122":                     "escaped slash in a .dic entry",
 	"slash":                      "escaped slash in a .dic entry",
 }
