@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/adrg/strutil"
 	"github.com/adrg/strutil/metrics"
@@ -421,7 +422,7 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 	}
 
 	// The forms a word may stand for, as Hunspell reads its capitals.
-	lower := strings.ToLower(word)
+	lower := s.lowerWord(word)
 	if _, ok := s.listed[lower]; ok {
 		return true
 	}
@@ -429,7 +430,7 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 	case noCap, huhCap:
 		// As written only: fOO is not foo.
 	case initCap:
-		if s.isWord(lower, true) {
+		if !s.dottedFirst(word) && s.isWord(lower, true) {
 			return true
 		}
 	case allCap:
@@ -438,7 +439,12 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 		}
 		// A KEEPCASE word is not reached by folding an all-caps one, and
 		// under CHECKSHARPS an all-caps ß word is written with SS.
-		for _, form := range []string{lower, capitalize(lower)} {
+		forms := []string{lower, capitalize(lower)}
+		if s.dottedFirst(word) {
+			// İZMİR is İzmir: the first letter keeps its dot.
+			forms = []string{"İ" + s.lowerWord(word[len("İ"):])}
+		}
+		for _, form := range forms {
 			for _, f := range s.analyses(form, false) {
 				if s.isForbidden(f.Word) || hasFlag(f.Flags, s.affix.CompoundOnly) ||
 					hasFlag(f.Flags, s.affix.KeepCaseFlag) || s.hasSharp(f.Word) {
@@ -448,7 +454,8 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 			}
 		}
 	case huhInitCap:
-		if s.isWord(lowerFirst(word), true) {
+		_, n := utf8.DecodeRuneInString(word)
+		if !s.dottedFirst(word) && s.isWord(s.lowerWord(word[:n])+word[n:], true) {
 			return true
 		}
 	}
@@ -902,7 +909,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 			continue
 		}
 
-		word, keyString, found := strings.Cut(line, "/")
+		word, keyString, found := splitEntry(line)
 		if word == "" || (found && keyString == "") {
 			// Skip malformed entries (e.g., a line with flags but no word)
 			// rather than abandoning the entire dictionary, which would leave
@@ -979,6 +986,19 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	return &gs, nil
 }
 
+// splitEntry divides a `.dic` entry into its word and flags. A `\/` is a
+// slash in the word, and so is a slash that starts it.
+func splitEntry(entry string) (string, string, bool) {
+	const escaped = "\uffff"
+	entry = strings.ReplaceAll(entry, `\/`, escaped)
+	at := strings.Index(entry[1:], "/")
+	if at < 0 {
+		return strings.ReplaceAll(entry, escaped, "/"), "", false
+	}
+	word, flags := entry[:at+1], entry[at+2:]
+	return strings.ReplaceAll(word, escaped, "/"), flags, true
+}
+
 // addRoot records a `.dic` entry.
 func (s *goSpell) addRoot(word string, flags []string) {
 	word = s.affix.ignore(word)
@@ -998,13 +1018,38 @@ func (s *goSpell) noteUpper(word string) {
 }
 
 // upperKey upper-cases a word as an all-caps writer would: under
-// CHECKSHARPS, ß and ẞ become SS.
+// CHECKSHARPS, ß and ẞ become SS; in a Turkic language, i becomes İ and ı
+// becomes I.
 func (s *goSpell) upperKey(word string) string {
+	if s.turkic() {
+		word = strings.NewReplacer("i", "İ", "ı", "I").Replace(word)
+	}
 	upper := strings.ToUpper(word)
 	if s.affix.CheckSharps {
 		upper = strings.NewReplacer("ß", "SS", "ẞ", "SS").Replace(upper)
 	}
 	return upper
+}
+
+// turkic reports whether LANG names a language with the dotted and dotless i.
+func (s *goSpell) turkic() bool {
+	lang := strings.ToLower(s.affix.Lang)
+	return strings.HasPrefix(lang, "tr") || strings.HasPrefix(lang, "az") || strings.HasPrefix(lang, "crh")
+}
+
+// lowerWord lower-cases a word: in a Turkic language, İ becomes i and I
+// becomes ı.
+func (s *goSpell) lowerWord(word string) string {
+	if s.turkic() {
+		word = strings.NewReplacer("İ", "i", "I", "ı").Replace(word)
+	}
+	return strings.ToLower(word)
+}
+
+// dottedFirst reports whether word starts with İ outside a Turkic language,
+// where that letter has no lower-case form to fold to.
+func (s *goSpell) dottedFirst(word string) bool {
+	return !s.turkic() && strings.HasPrefix(word, "İ")
 }
 
 // hasSharp reports whether word holds a sharp s, in either case.

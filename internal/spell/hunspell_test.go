@@ -16,15 +16,8 @@ var hunspellUnsupported = map[string]string{
 	"hu":                         "a hyphenated compound whose left part is forbidden on its own",
 	"limit-multiple-compounding": "a three-part compound one edit from a dictionary word",
 	"opentaal_cpdpat2":           "CHECKCOMPOUNDPATTERN",
-	"base_utf":                   "Turkish dotless i in case folding",
-	"dotless_i":                  "Turkish dotless i in case folding",
 	"ph2":                        "FORBIDDENWORD against case variants",
 	"nepali":                     "a zero-width joiner and non-joiner told apart under IGNORE",
-	"gh353":                      "non-ASCII digits",
-	"fullstrip":                  "FULLSTRIP",
-	"gh1044":                     "FULLSTRIP",
-	"gh1122":                     "escaped slash in a .dic entry",
-	"slash":                      "escaped slash in a .dic entry",
 }
 
 // TestHunspellCorpus runs Hunspell's own test fixtures: every word in a

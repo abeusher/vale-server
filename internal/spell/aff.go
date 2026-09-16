@@ -118,6 +118,7 @@ type dictConfig struct {
 	Aliases            []string // AF: flag sets that an entry names by number
 	IgnoreChars        string   // IGNORE: characters dropped from words and affixes
 	CheckSharps        bool     // CHECKSHARPS: an all-caps word writes ß as SS
+	Lang               string   // LANG: Turkic casing when it starts with tr, az, or crh
 
 	BreakDeclared       bool // any BREAK line; otherwise Hunspell's defaults apply
 	CheckCompoundDup    bool // CHECKCOMPOUNDDUP: no segment twice in a row
@@ -698,6 +699,10 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			aff.CompoundPatterns = append(aff.CompoundPatterns, p)
 		case "CHECKSHARPS":
 			aff.CheckSharps = true
+		case "LANG":
+			if len(parts) >= 2 {
+				aff.Lang = parts[1]
+			}
 		case "IGNORE":
 			if len(parts) >= 2 {
 				aff.IgnoreChars = parts[1]
@@ -776,7 +781,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			// fields -- some dictionaries (e.g. OpenTaal's Dutch) omit the
 			// rule's condition -- so distinguish by the cross-product flag
 			// rather than by field count alone. See #776.
-			isHeader := sections == 4 &&
+			isHeader := sections >= 4 &&
 				(parts[2] == "Y" || parts[2] == "N") && allDigits(parts[3])
 			switch {
 			case isHeader:
@@ -793,7 +798,8 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				flag := aff.singleFlag(parts[1])
 				a, ok := aff.AffixMap[flag]
 				if !ok {
-					return nil, fmt.Errorf("got rules for flag %q but no definition", flag)
+					// Hunspell skips a rule whose class was never declared.
+					continue
 				}
 
 				strip := ""
