@@ -333,6 +333,7 @@ const maxAffixDepth = 2
 type segment struct {
 	begin, middle, end bool
 	upper              bool     // FORCEUCASE: a compound ending here is capitalized
+	keep               bool     // KEEPCASE: not part of a case-folded compound
 	affixed            bool     // built with an affix, which a `0` pattern excludes
 	flags              []string // for the flags a CHECKCOMPOUNDPATTERN names
 }
@@ -342,6 +343,7 @@ func (s segment) merge(o segment) segment {
 	return segment{
 		begin: s.begin || o.begin, middle: s.middle || o.middle, end: s.end || o.end,
 		upper:   s.upper || o.upper,
+		keep:    s.keep || o.keep,
 		affixed: s.affixed && o.affixed,
 		flags:   union(s.flags, o.flags),
 	}

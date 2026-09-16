@@ -22,6 +22,11 @@ type wordMatch struct {
 type goSpell struct {
 	dict  map[string]struct{}
 	exact map[string]struct{} // KEEPCASE words, matched as written
+	upper map[string]struct{} // the upper-cased form of each word with a capital
+
+	// listed holds the words an ignore list added. They match as written
+	// or lower-cased, whatever the input's case, as they always have.
+	listed map[string]struct{}
 
 	// forbidden holds FORBIDDENWORD forms, which no other path may accept.
 	forbidden map[string]struct{}
@@ -113,6 +118,7 @@ func (s *goSpell) addWordRaw(word string) bool {
 		return false
 	}
 	s.dict[word] = struct{}{}
+	s.listed[word] = struct{}{}
 	return true
 }
 
@@ -227,25 +233,99 @@ func (s *goSpell) spell(word string) bool {
 	return s.spellDepth(word, 0)
 }
 
+// caseType is Hunspell's classification of a word by its capitals.
+type caseType int
+
+const (
+	noCap      caseType = iota // hello
+	initCap                    // Hello
+	allCap                     // HELLO
+	huhInitCap                 // ULinda
+	huhCap                     // uLinda, fOO
+)
+
+// classifyCase reports which case forms a word may stand for.
+func classifyCase(word string) caseType {
+	var letters, uppers int
+	firstUpper := false
+	for i, r := range word {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		letters++
+		if unicode.IsUpper(r) {
+			uppers++
+			if i == 0 {
+				firstUpper = true
+			}
+		}
+	}
+	switch {
+	case uppers == 0:
+		return noCap
+	case uppers == letters:
+		return allCap
+	case uppers == 1 && firstUpper:
+		return initCap
+	case firstUpper:
+		return huhInitCap
+	default:
+		return huhCap
+	}
+}
+
+// lowerFirst lower-cases the first rune of s, leaving the rest unchanged.
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	r[0] = unicode.ToLower(r[0])
+	return string(r)
+}
+
 // spellDepth is spell with a count of how many BREAK splits led here.
 func (s *goSpell) spellDepth(word string, depth int) bool {
 	if _, ok := s.forbidden[word]; ok {
 		return false
 	}
+	// A trailing period is an abbreviation's, or the sentence's.
+	if strings.HasSuffix(word, ".") {
+		if t := strings.TrimRight(word, "."); t != "" && s.spellDepth(t, depth) {
+			return true
+		}
+	}
 	if _, ok := s.exact[word]; ok {
 		return true
 	}
-	_, ok := s.dict[word]
-	if ok {
+	if _, ok := s.dict[word]; ok {
 		return true
 	}
+
+	// The forms a word may stand for, as Hunspell reads its capitals.
 	lower := strings.ToLower(word)
-	if _, ok = s.dict[lower]; ok {
+	if _, ok := s.listed[lower]; ok {
 		return true
 	}
-	// An upper-cased word matches a capitalized entry: PARIS for Paris.
-	if allUpper(word) {
-		if _, ok = s.dict[capitalize(lower)]; ok {
+	switch classifyCase(word) {
+	case noCap, huhCap:
+		// As written only: fOO is not foo.
+	case initCap:
+		if _, ok := s.dict[lower]; ok {
+			return true
+		}
+	case allCap:
+		if _, ok := s.upper[word]; ok {
+			return true
+		}
+		if _, ok := s.dict[lower]; ok {
+			return true
+		}
+		if _, ok := s.dict[capitalize(lower)]; ok {
+			return true
+		}
+	case huhInitCap:
+		if _, ok := s.dict[lowerFirst(word)]; ok {
 			return true
 		}
 	}
@@ -282,7 +362,7 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 	units := isNumberUnits(word)
 	if units != "" {
 		// dictionary appears to have list of units
-		if _, ok = s.dict[units]; ok {
+		if _, ok := s.dict[units]; ok {
 			return true
 		}
 	}
@@ -358,16 +438,24 @@ func (s *goSpell) isCompound(word string) bool {
 		return false
 	}
 
-	forms := []string{word}
+	if s.compoundParts([]rune(word), word, false, nil, nil, 0) {
+		return true
+	}
+	// A folded form: a KEEPCASE segment refuses it.
+	var forms []string
 	lower := strings.ToLower(word)
-	switch {
-	case allUpper(word):
-		forms = append(forms, lower, capitalize(lower))
-	case initialUpper(word):
-		forms = append(forms, lower)
+	switch classifyCase(word) {
+	case noCap, huhCap:
+		// As written only.
+	case allCap:
+		forms = []string{lower, capitalize(lower)}
+	case initCap:
+		forms = []string{lower}
+	case huhInitCap:
+		forms = []string{lowerFirst(word)}
 	}
 	for _, form := range forms {
-		if s.compoundParts([]rune(form), word, nil, nil, 0) {
+		if s.compoundParts([]rune(form), word, true, nil, nil, 0) {
 			return true
 		}
 	}
@@ -384,8 +472,9 @@ type piece struct {
 
 // compoundParts reports whether runes split into segments allowed at their
 // positions. prev is the segment before them; need is the pattern whose
-// replacement they follow, if any; word is the whole word, for FORCEUCASE.
-func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *compoundPattern, depth int) bool {
+// replacement they follow, if any; word is the whole word, for FORCEUCASE,
+// and folded says runes are a case-folded form of it.
+func (s *goSpell) compoundParts(runes []rune, word string, folded bool, prev *piece, need *compoundPattern, depth int) bool {
 	if depth > 4 { // cap the number of segments
 		return false
 	}
@@ -411,7 +500,7 @@ func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *co
 			candidates = append(candidates, left+string(runes[i]))
 		}
 		for _, seg := range candidates {
-			if s.compoundFrom(seg, rest, word, prev, need, nil, depth) {
+			if s.compoundFrom(seg, rest, word, folded, prev, need, nil, depth) {
 				return true
 			}
 		}
@@ -431,7 +520,7 @@ func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *co
 			}
 			seg := string(runes[:j]) + p.end
 			rest := append([]rune(p.begin), runes[j+len(repl):]...)
-			if s.compoundFrom(seg, rest, word, prev, need, p, depth) {
+			if s.compoundFrom(seg, rest, word, folded, prev, need, p, depth) {
 				return true
 			}
 		}
@@ -442,10 +531,10 @@ func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *co
 // compoundFrom reports whether seg, followed by rest, completes a compound.
 // need is the pattern seg has to satisfy the right side of; next the one
 // whose replacement separates seg from what follows.
-func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece, need, next *compoundPattern, depth int) bool {
+func (s *goSpell) compoundFrom(seg string, rest []rune, word string, folded bool, prev *piece, need, next *compoundPattern, depth int) bool {
 	use, ok := s.segment(seg)
 	first := prev == nil
-	if !ok || (first && !use.begin) || (!first && !use.middle) {
+	if !ok || (first && !use.begin) || (!first && !use.middle) || (folded && use.keep) {
 		return false
 	}
 	if need != nil && need.beginFlag != "" && !hasFlag(use.flags, need.beginFlag) {
@@ -464,7 +553,7 @@ func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece
 	}
 
 	last := string(rest)
-	if end, isEnd := s.segment(last); isEnd && end.end &&
+	if end, isEnd := s.segment(last); isEnd && end.end && !(folded && end.keep) &&
 		!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) &&
 		!s.repMakesWord(seg+last, cur.sofar+last) {
 		if next != nil {
@@ -476,7 +565,7 @@ func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece
 			return true
 		}
 	}
-	return s.compoundParts(rest, word, cur, next, depth+1)
+	return s.compoundParts(rest, word, folded, cur, next, depth+1)
 }
 
 // repMakesWord reports whether CHECKCOMPOUNDREP forbids a compound: one REP
@@ -586,6 +675,8 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		// TODO: Use fixed size from first list?
 		dict:        make(map[string]struct{}),
 		exact:       make(map[string]struct{}),
+		upper:       make(map[string]struct{}),
+		listed:      make(map[string]struct{}),
 		compounds:   make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
 		splitter:    newSplitter(affix.WordChars),
 		canCompound: affix.compoundingEnabled(),
@@ -667,6 +758,13 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		case affix.entryHas(line, affix.KeepCaseFlag):
 			for _, f := range forms {
 				gs.exact[f.Word] = struct{}{}
+				if seg, ok := affix.compoundUse(f); ok {
+					seg.keep = true
+					if have, known := gs.segments[f.Word]; known {
+						seg = have.merge(seg)
+					}
+					gs.segments[f.Word] = seg
+				}
 			}
 		default:
 			for _, f := range forms {
@@ -694,6 +792,14 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 
 	for word := range gs.noCompound {
 		delete(gs.segments, word)
+	}
+
+	// Hunspell keeps an upper-cased homonym of every capitalized or
+	// mixed-case entry, so OPENOFFICE.ORG matches OpenOffice.org.
+	for word := range gs.dict {
+		if word != strings.ToLower(word) {
+			gs.upper[strings.ToUpper(word)] = struct{}{}
+		}
 	}
 
 	// A forbidden word overrides any entry that generates it.
