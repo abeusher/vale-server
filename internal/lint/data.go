@@ -185,7 +185,7 @@ func (l *Linter) lintScopedValues(f *core.File, values []core.ScopedValues) erro
 
 	// The values were linted in the file's place; put the file back, so the
 	// `raw` scope that runs next reads the document and not the last value.
-	f.SetText(wholeFile)
+	f.RestoreText(wholeFile)
 	return err
 }
 

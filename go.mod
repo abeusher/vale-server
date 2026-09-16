@@ -26,7 +26,7 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/tomwright/dasel/v2 v2.8.1
 	github.com/tomwright/dasel/v3 v3.10.1
-	github.com/yuin/goldmark v1.7.8
+	github.com/yuin/goldmark v1.8.6
 	golang.org/x/exp v0.0.0-20250106191152-7588d65b2ba8
 	golang.org/x/net v0.57.0
 	golang.org/x/sys v0.47.0

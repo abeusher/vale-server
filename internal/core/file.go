@@ -492,6 +492,20 @@ func (f *File) SetText(s string) {
 	f.history = map[string]int{}
 }
 
+// RestoreText puts the file's text back after values were linted in its
+// place, keeping the alerts already reported from being reported again.
+func (f *File) RestoreText(s string) {
+	f.SetText(s)
+	for _, a := range f.Alerts {
+		f.history[historyKey(a)] = 1
+	}
+}
+
+// historyKey identifies an alert by where it was reported.
+func historyKey(a Alert) string {
+	return strings.Join([]string{strconv.Itoa(a.Line), strconv.Itoa(a.Span[0]), a.Check}, "-")
+}
+
 // SetNormedExt sets the normalized extension of a File.
 func (f *File) SetNormedExt(ext string) {
 	f.NormedExt = "." + ext
@@ -590,11 +604,7 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 		}
 		if !a.Hide {
 			// Ensure that we're not double-reporting an Alert:
-			entry := strings.Join([]string{
-				strconv.Itoa(a.Line),
-				strconv.Itoa(a.Span[0]),
-				a.Check}, "-")
-
+			entry := historyKey(a)
 			if _, found := f.history[entry]; !found {
 				// Check rule-assigned limits for reporting:
 				count, occur := f.limits[a.Check]

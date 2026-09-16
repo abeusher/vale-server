@@ -50,3 +50,30 @@ cases:
       test2.md:2:8:Meta.Title:'How the SDK works' should be in title case
       test2.md:5:3:vale.Annotations:'TODO' left in text
       test3.md:2:8:Meta.Title:'castle' should be in title case
+
+  - name: shared-prefix
+    about: "A field's value is placed by its scalar, not by searching the
+      file for its text. A description that starts with a word the title
+      also starts with used to land on the title's line and collide with the
+      title's own alert, so which of the two survived changed run to run."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        ---
+        title: "Contactar al soporte"
+        description: "Contacta al soporte de Mintlify."
+        ---
+
+        Body text.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:2:9:Vale.Spelling:Did you really mean 'Contactar'?
+      test.md:2:22:Vale.Spelling:Did you really mean 'soporte'?
+      test.md:3:15:Vale.Spelling:Did you really mean 'Contacta'?
+      test.md:3:27:Vale.Spelling:Did you really mean 'soporte'?
+      test.md:3:38:Vale.Spelling:Did you really mean 'Mintlify'?
