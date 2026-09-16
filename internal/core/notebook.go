@@ -204,10 +204,10 @@ func blankFirstLine(text string) string {
 // hold, so the value's parts start after it.
 func sourceValue(source *yaml.Node, srcLines []string, prefix string) ScopedValue {
 	var nodes []*yaml.Node
-	switch source.Kind { //nolint:exhaustive // a source is a string or a list
-	case yaml.ScalarNode:
+	switch {
+	case source.Kind == yaml.ScalarNode:
 		nodes = []*yaml.Node{source}
-	case yaml.SequenceNode:
+	case source.Kind == yaml.SequenceNode:
 		nodes = source.Content
 	}
 
