@@ -194,7 +194,9 @@ func (l *Linter) lintFiles(done <-chan core.File, root string) (<-chan lintResul
 				return err
 			}
 
-			if info.IsDir() && core.ShouldIgnoreDirectory(fp) {
+			if info.IsDir() && (core.ShouldIgnoreDirectory(fp) || (fp != root && l.isStylesPath(fp))) {
+				// A StylesPath holds rules, vocabularies, and synced
+				// packages, not prose; it is linted only when named.
 				return filepath.SkipDir
 			} else if info.IsDir() || l.skip(fp) {
 				return nil
@@ -291,6 +293,10 @@ func (l *Linter) lintFile(src string) lintResult {
 		case ".org":
 			err = l.lintOrg(file)
 		}
+	} else if !simple && isRuleFile(file) {
+		// A Vale rule: its message and description are prose, and its
+		// tokens and swaps are not.
+		err = l.lintRule(file)
 	} else if file.Format == "data" && !simple && hasViews {
 		err = l.lintData(file)
 	} else if file.Format == "code" && !simple {
@@ -604,6 +610,20 @@ func (l *Linter) inScopeFor(blk nlp.Block) []scopedRule {
 	}
 
 	return found
+}
+
+// isStylesPath reports whether dir is one of the configuration's StylesPaths.
+func (l *Linter) isStylesPath(dir string) bool {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	for _, p := range l.Manager.Config.Paths {
+		if candidate, absErr := filepath.Abs(p); absErr == nil && candidate == abs {
+			return true
+		}
+	}
+	return false
 }
 
 // runsScoped reports whether a rule scoped to `scope` will run on f.

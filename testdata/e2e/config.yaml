@@ -425,3 +425,73 @@ cases:
     args: test.md
     exit: 0
     want: ""
+
+  - name: styles-path-not-walked
+    about: a StylesPath holds rules and vocabularies, not prose, so a walk
+      skips it; naming a file inside it still lints that file
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/README.md: |
+        This is a readme with a typpo.
+      docs/page.md: |
+        This page has a typpo.
+    args: .
+    exit: 1
+    want: |
+      docs/page.md:1:17:Vale.Spelling:Did you really mean 'typpo'?
+      test.md:1:66:Vale.Spelling:Did you really mean 'javascript'?
+      test.md:1:77:Vale.Spelling:Did you really mean 'agendize'?
+
+  - name: styles-path-named
+    about: the same project, with the file inside the StylesPath named
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/README.md: |
+        This is a readme with a typpo.
+    args: styles/Demo/README.md
+    exit: 1
+    want: |
+      styles/Demo/README.md:1:11:Vale.Spelling:Did you really mean 'readme'?
+      styles/Demo/README.md:1:25:Vale.Spelling:Did you really mean 'typpo'?
+
+  - name: rule-file-prose-only
+    about: a Vale rule named on the command line is linted by its message and
+      description; its tokens, swaps, and exceptions are patterns, not prose
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/Rule.yml: |
+        extends: substitution
+        message: "Prefer %s over %s, plaese."
+        description: |
+          A typpo here, and
+          another typpo there.
+        link: https://example.com/optimi[sz]e
+        level: warning
+        swap:
+          teh quick: the quick
+        exceptions:
+          - teh brown
+        tokens:
+          - teh lazy dog
+          - skillz
+    args: styles/Demo
+    exit: 1
+    want: |
+      styles/Demo/Rule.yml:2:30:Vale.Spelling:Did you really mean 'plaese'?
+      styles/Demo/Rule.yml:4:5:Vale.Spelling:Did you really mean 'typpo'?
+      styles/Demo/Rule.yml:5:11:Vale.Spelling:Did you really mean 'typpo'?

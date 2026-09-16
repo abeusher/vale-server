@@ -2,7 +2,10 @@ package lint
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/vale-cli/vale/v3/internal/core"
 	"github.com/vale-cli/vale/v3/internal/glob"
@@ -22,6 +25,43 @@ func (l *Linter) hasView(f *core.File) bool {
 		}
 	}
 	return false
+}
+
+// ruleProse names the fields of a Vale rule that hold prose.
+var ruleProse = []string{"message", "description"}
+
+// extendsKey opens a Vale rule: a top-level `extends`.
+var extendsKey = regexp.MustCompile(`(?m)^extends:[ \t]*\S`)
+
+// isRuleFile reports whether f is a Vale rule, which a YAML file with a
+// top-level `extends` is.
+func isRuleFile(f *core.File) bool {
+	return f.NormedExt == ".yml" && extendsKey.MatchString(f.Content)
+}
+
+// lintRule lints a Vale rule's message and description, and nothing else:
+// its tokens, swaps, and exceptions are patterns, and often wrong on purpose.
+func (l *Linter) lintRule(f *core.File) error {
+	var fields map[string]any
+	if err := yaml.Unmarshal([]byte(f.Content), &fields); err != nil {
+		return nil //nolint:nilerr // not a rule Vale could load either; nothing to lint
+	}
+
+	view := core.View{Engine: "dasel"}
+	for _, key := range ruleProse {
+		if _, ok := fields[key]; ok {
+			view.Scopes = append(view.Scopes, core.Scope{Expr: key})
+		}
+	}
+	if len(view.Scopes) == 0 {
+		return nil
+	}
+
+	found, err := view.Apply(f)
+	if err != nil {
+		return core.NewE100(f.Path, err)
+	}
+	return l.lintScopedValues(f, found)
 }
 
 func (l *Linter) lintData(f *core.File) error {
