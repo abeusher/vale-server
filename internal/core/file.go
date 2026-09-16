@@ -136,7 +136,7 @@ func NewFile(src string, config *Config) (*File, error) {
 	}
 
 	filepaths := []string{path}
-	normed := system.ReplaceFileExt(path, config.Formats)
+	normed := NormalizePath(path, config.Formats)
 
 	baseStyles := config.GBaseStyles
 	checks := make(map[string]bool)

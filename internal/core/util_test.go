@@ -257,3 +257,42 @@ func TestCheckName(t *testing.T) {
 		}
 	}
 }
+
+// A `[formats]` key may name a file or a glob, not only an extension.
+func TestFormatFromNameOrGlob(t *testing.T) {
+	mapping := map[string]string{
+		"COMMIT_EDITMSG": "md",
+		"Makefile":       "rst",
+		"notes/*.txt":    "md",
+		"*.log":          "adoc",
+		"ts":             "js",
+	}
+
+	cases := map[string][2]string{
+		".git/COMMIT_EDITMSG": {".md", "markup"},
+		"Makefile":            {".rst", "markup"},
+		"notes/today.txt":     {".md", "markup"},
+		"other/today.txt":     {".txt", "text"},
+		"build.log":           {".adoc", "markup"},
+		"src/app.ts":          {".js", "code"},
+		"LICENSE":             {"unknown", "unknown"},
+	}
+	for path, want := range cases {
+		ext, format := FormatFromExt(path, mapping)
+		if ext != want[0] || format != want[1] {
+			t.Errorf("FormatFromExt(%q) = [%s %s], want %v", path, ext, format, want)
+		}
+	}
+
+	normed := map[string]string{
+		".git/COMMIT_EDITMSG": ".git/COMMIT_EDITMSG.md",
+		"notes/today.txt":     "notes/today.md",
+		"other/today.txt":     "other/today.txt",
+		"src/app.ts":          "src/app.js",
+	}
+	for path, want := range normed {
+		if got := NormalizePath(path, mapping); got != want {
+			t.Errorf("NormalizePath(%q) = %q, want %q", path, got, want)
+		}
+	}
+}

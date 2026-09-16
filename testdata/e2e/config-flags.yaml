@@ -109,3 +109,28 @@ cases:
     exit: 2
     contains: |
       E100 [.vale.ini not found] Runtime error
+
+  - name: formats-by-name
+    about: a `[formats]` key may name a file, so an extensionless one is read as markup
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        COMMIT_EDITMSG = md
+
+        [COMMIT_EDITMSG]
+        BasedOnStyles = Test
+      styles/Test/Term.yml: |
+        extends: existence
+        message: "Use 'flag' instead of '%s'."
+        level: error
+        tokens:
+          - option
+      COMMIT_EDITMSG: |
+        Add the `option` for the new option
+    args: COMMIT_EDITMSG
+    exit: 1
+    want: |
+      COMMIT_EDITMSG:1:30:Test.Term:Use 'flag' instead of 'option'.
