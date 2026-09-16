@@ -139,6 +139,7 @@ type dictConfig struct {
 	CheckCompoundTriple bool // CHECKCOMPOUNDTRIPLE: no letter three times at a boundary
 	SimplifiedTriple    bool // SIMPLIFIEDTRIPLE: a triple may be written as a double
 	CheckCompoundCase   bool // CHECKCOMPOUNDCASE: no upper-case letter at a boundary
+	CompoundPatterns    []compoundPattern
 
 	// Ignored names the directives the file used that this reader does not
 	// implement, in the order they were first seen.
@@ -329,7 +330,9 @@ const maxAffixDepth = 2
 // segment is what a form may do in a compound.
 type segment struct {
 	begin, middle, end bool
-	upper              bool // FORCEUCASE: a compound ending here is capitalized
+	upper              bool     // FORCEUCASE: a compound ending here is capitalized
+	affixed            bool     // built with an affix, which a `0` pattern excludes
+	flags              []string // for the flags a CHECKCOMPOUNDPATTERN names
 }
 
 // compoundUse reports whether f may be a compound segment, and where.
@@ -339,19 +342,47 @@ func (a dictConfig) compoundUse(f entryForm) (segment, bool) {
 	}
 	anywhere := hasFlag(f.Flags, a.CompoundFlag)
 	seg := segment{
-		begin:  anywhere || hasFlag(f.Flags, a.CompoundBegin),
-		middle: anywhere || hasFlag(f.Flags, a.CompoundMiddle),
-		end:    anywhere || hasFlag(f.Flags, a.CompoundEnd),
-		upper:  hasFlag(f.Flags, a.ForceUCaseFlag),
+		begin:   anywhere || hasFlag(f.Flags, a.CompoundBegin),
+		middle:  anywhere || hasFlag(f.Flags, a.CompoundMiddle),
+		end:     anywhere || hasFlag(f.Flags, a.CompoundEnd),
+		upper:   hasFlag(f.Flags, a.ForceUCaseFlag),
+		affixed: f.prefix != nil || f.suffix != nil,
+		flags:   f.Flags,
 	}
 	// An affix keeps its form at the compound's edge unless it permits more.
 	if f.prefix != nil && !hasFlag(a.parseFlags(f.prefix.Cont), a.CompoundPermitFlag) {
 		seg.middle, seg.end = false, false
 	}
-	if f.suffix != nil && !hasFlag(a.parseFlags(f.suffix.Cont), a.CompoundPermitFlag) {
-		seg.begin, seg.middle = false, false
+	if f.suffix != nil {
+		cont := a.parseFlags(f.suffix.Cont)
+		if !hasFlag(cont, a.CompoundPermitFlag) {
+			seg.begin, seg.middle = false, false
+		}
+		// A suffix only for compounds, a German Fuge-s, is never last.
+		if hasFlag(cont, a.CompoundOnly) {
+			seg.end = false
+		}
 	}
 	return seg, seg.begin || seg.middle || seg.end
+}
+
+// compoundPattern is one CHECKCOMPOUNDPATTERN line: a boundary that is
+// forbidden as written, and may be written as repl instead.
+type compoundPattern struct {
+	end, begin         string // what the left segment ends with and the right begins with
+	endFlag, beginFlag string // flags each must carry, if any
+	stemOnly           bool   // `0`: the left segment is an unaffixed stem
+	repl               string
+}
+
+// parsePatternSide reads `chars[/flag]`, returning the characters, the
+// flag, and whether `0` asked for an unaffixed stem.
+func parsePatternSide(s string) (string, string, bool) {
+	chars, flag, _ := strings.Cut(s, "/")
+	if chars == "0" {
+		return "", flag, true
+	}
+	return chars, flag, false
 }
 
 // hasFlag reports whether flag is set and among flags.
@@ -514,6 +545,21 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			aff.SimplifiedTriple = true
 		case "CHECKCOMPOUNDCASE":
 			aff.CheckCompoundCase = true
+		case "CHECKCOMPOUNDPATTERN":
+			// The first line is a count.
+			if len(parts) == 2 && allDigits(parts[1]) {
+				continue
+			}
+			if len(parts) < 3 {
+				return nil, fmt.Errorf("CHECKCOMPOUNDPATTERN stanza had %d fields, expected 3", len(parts))
+			}
+			var p compoundPattern
+			p.end, p.endFlag, p.stemOnly = parsePatternSide(parts[1])
+			p.begin, p.beginFlag, _ = parsePatternSide(parts[2])
+			if len(parts) > 3 {
+				p.repl = parts[3]
+			}
+			aff.CompoundPatterns = append(aff.CompoundPatterns, p)
 		case "AF":
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("AF stanza had %d fields, expected 2", len(parts))

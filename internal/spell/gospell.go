@@ -41,6 +41,7 @@ type goSpell struct {
 	checkTriple bool // CHECKCOMPOUNDTRIPLE
 	simplified  bool // SIMPLIFIEDTRIPLE
 	checkCase   bool // CHECKCOMPOUNDCASE
+	patterns    []compoundPattern
 	breaks      []breakRule
 	ignored     []string // .aff directives the reader does not implement
 }
@@ -350,27 +351,27 @@ func (s *goSpell) isCompound(word string) bool {
 	// Bound the work: very long inputs are unlikely to be real words and the
 	// recursion is super-linear.
 	if r := []rune(word); len(r) <= 100 {
-		return s.compoundParts(r, word, 0)
+		return s.compoundParts(r, word, nil, nil, 0)
 	}
 	return false
 }
 
+// piece is a segment of a compound as written, with what it may do.
+type piece struct {
+	text string
+	use  segment
+}
+
 // compoundParts reports whether runes split into segments allowed at their
-// positions; word is the whole word, for FORCEUCASE.
-func (s *goSpell) compoundParts(runes []rune, word string, depth int) bool {
+// positions. prev is the segment before them; need is the pattern whose
+// replacement they follow, if any; word is the whole word, for FORCEUCASE.
+func (s *goSpell) compoundParts(runes []rune, word string, prev *piece, need *compoundPattern, depth int) bool {
 	if depth > 4 { // cap the number of segments
 		return false
 	}
-	// Enforce a sane minimum segment length. Some dictionaries set
-	// COMPOUNDMIN very low (OpenTaal's Dutch uses 0). Without a floor, every
-	// short letter string would split into 1-2 char dictionary entries and
-	// be wrongly accepted. See #776.
-	minLen := s.compoundMin
-	if minLen < 3 {
-		minLen = 3
-	}
-	first := depth == 0
+	minLen := max(s.compoundMin, 1)
 	n := len(runes)
+
 	for i := minLen; i <= n-minLen; i++ {
 		if !s.boundaryOK(runes, i) {
 			continue
@@ -383,23 +384,87 @@ func (s *goSpell) compoundParts(runes []rune, word string, depth int) bool {
 		if s.simplified && runes[i-1] == runes[i] {
 			candidates = append(candidates, left+string(runes[i]))
 		}
-
 		for _, seg := range candidates {
-			use, ok := s.segment(seg)
-			if !ok || (first && !use.begin) || (!first && !use.middle) {
-				continue
-			}
-			// Hunspell forbids a duplicate only at the end: foofoobar is
-			// fine, foobarbar is not.
-			last := string(rest)
-			if end, isEnd := s.segment(last); isEnd && end.end &&
-				!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) {
-				return true
-			}
-			if s.compoundParts(rest, word, depth+1) {
+			if s.compoundFrom(seg, rest, word, prev, need, nil, depth) {
 				return true
 			}
 		}
+	}
+
+	// A pattern with a replacement writes the boundary as the replacement:
+	// `a/A u/A O` makes sUrya+udayaM into sUryOdayaM.
+	for pi := range s.patterns {
+		p := &s.patterns[pi]
+		if p.repl == "" {
+			continue
+		}
+		repl := []rune(p.repl)
+		for j := 1; j+len(repl) < n; j++ {
+			if string(runes[j:j+len(repl)]) != p.repl {
+				continue
+			}
+			seg := string(runes[:j]) + p.end
+			rest := append([]rune(p.begin), runes[j+len(repl):]...)
+			if s.compoundFrom(seg, rest, word, prev, need, p, depth) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// compoundFrom reports whether seg, followed by rest, completes a compound.
+// need is the pattern seg has to satisfy the right side of; next the one
+// whose replacement separates seg from what follows.
+func (s *goSpell) compoundFrom(seg string, rest []rune, word string, prev *piece, need, next *compoundPattern, depth int) bool {
+	use, ok := s.segment(seg)
+	first := prev == nil
+	if !ok || (first && !use.begin) || (!first && !use.middle) {
+		return false
+	}
+	if need != nil && need.beginFlag != "" && !hasFlag(use.flags, need.beginFlag) {
+		return false
+	}
+	if next != nil && ((next.endFlag != "" && !hasFlag(use.flags, next.endFlag)) ||
+		(next.stemOnly && use.affixed)) {
+		return false
+	}
+	cur := &piece{text: seg, use: use}
+	if prev != nil && s.patternForbids(prev, cur) {
+		return false
+	}
+
+	last := string(rest)
+	if end, isEnd := s.segment(last); isEnd && end.end &&
+		!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) {
+		if next != nil {
+			// Hunspell forbids a duplicate only at the end: foofoobar is
+			// fine, foobarbar is not.
+			return next.beginFlag == "" || hasFlag(end.flags, next.beginFlag)
+		}
+		if !s.patternForbids(cur, &piece{text: last, use: end}) {
+			return true
+		}
+	}
+	return s.compoundParts(rest, word, cur, next, depth+1)
+}
+
+// patternForbids reports whether a CHECKCOMPOUNDPATTERN forbids writing
+// left and right together.
+func (s *goSpell) patternForbids(left, right *piece) bool {
+	for i := range s.patterns {
+		p := &s.patterns[i]
+		if p.stemOnly && left.use.affixed {
+			continue
+		}
+		if !strings.HasSuffix(left.text, p.end) || !strings.HasPrefix(right.text, p.begin) {
+			continue
+		}
+		if (p.endFlag != "" && !hasFlag(left.use.flags, p.endFlag)) ||
+			(p.beginFlag != "" && !hasFlag(right.use.flags, p.beginFlag)) {
+			continue
+		}
+		return true
 	}
 	return false
 }
@@ -463,6 +528,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		checkTriple: affix.CheckCompoundTriple,
 		simplified:  affix.SimplifiedTriple,
 		checkCase:   affix.CheckCompoundCase,
+		patterns:    affix.CompoundPatterns,
 		breaks:      newBreakRules(affix.Break),
 		ignored:     affix.Ignored,
 		forbidden:   make(map[string]struct{}),
