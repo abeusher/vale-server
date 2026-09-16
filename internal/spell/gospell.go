@@ -447,9 +447,15 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 		return true
 	}
 
-	// check compounds
+	// A COMPOUNDRULE reads the word as written or, for a capitalized or
+	// all-caps word, lower-cased: 42ND is 42nd. A compound has two parts at
+	// least, so an entry on its own is not one.
 	for _, pat := range s.compounds {
-		if pat.MatchString(word) {
+		if _, entry := s.roots[word]; !entry && pat.MatchString(word) {
+			return true
+		}
+		if _, entry := s.roots[lower]; !entry && lower != word &&
+			classifyCase(word) != huhCap && pat.MatchString(lower) {
 			return true
 		}
 	}
@@ -906,18 +912,24 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	}
 
 	for _, compoundRule := range affix.CompoundRule {
+		// Each flag becomes a group of the words that carry it, and `*`
+		// and `?` apply to the group before them.
 		pattern := "^"
-		for _, key := range affix.parseFlags(compoundRule) {
-			if len(key) == 1 {
-				r := rune(key[0])
-				switch r {
-				case '(', ')', '+', '?', '*':
-					pattern += regexp.QuoteMeta(key)
-					continue
-				}
+		for _, tok := range affix.compoundRuleTokens(compoundRule) {
+			if tok.op != "" {
+				pattern += tok.op
+				continue
 			}
-			groups := affix.compoundMap[key]
-			pattern = pattern + "(" + strings.Join(groups, "|") + ")"
+			words := affix.compoundMap[tok.flag]
+			if len(words) == 0 {
+				pattern += `([^\s\S])` // nothing carries the flag
+				continue
+			}
+			quoted := make([]string, len(words))
+			for i, w := range words {
+				quoted[i] = regexp.QuoteMeta(w)
+			}
+			pattern += "(" + strings.Join(quoted, "|") + ")"
 		}
 		pattern += "$"
 

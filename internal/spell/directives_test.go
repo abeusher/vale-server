@@ -110,3 +110,34 @@ dog/1
 		"dog": true, "dogs": true, "doged": false,
 	})
 }
+
+// A zero affix may still carry continuation flags: `0/L` is an unchanged
+// form that the prefix L then applies to. See #1160.
+func TestZeroAffixWithContinuationFlags(t *testing.T) {
+	gs := speller(t, `SET UTF-8
+PFX L Y 1
+PFX L 0 l' .
+SFX F Y 1
+SFX F 0 0/L .
+`, `1
+ordinateur/F
+`)
+	checkWords(t, gs, map[string]bool{
+		"ordinateur": true, "l'ordinateur": true,
+		"ordinateur0": false, "l'ordinateur0": false,
+	})
+}
+
+// A prefix rule strips before it adds: `a l'A a` makes l'Ami from ami. See
+// #1160.
+func TestPrefixStrip(t *testing.T) {
+	gs := speller(t, `SET UTF-8
+PFX A N 1
+PFX A a l'A a
+`, `1
+ami/A
+`)
+	checkWords(t, gs, map[string]bool{
+		"ami": true, "l'Ami": true, "l'Aami": false,
+	})
+}

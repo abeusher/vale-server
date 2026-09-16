@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // affixType is either an affix prefix or suffix
@@ -195,6 +196,41 @@ func (a dictConfig) parseFlags(flagStr string) []string {
 		}
 		return flags
 	}
+}
+
+// ruleToken is one element of a COMPOUNDRULE: a flag, or the `*` or `?`
+// that follows one.
+type ruleToken struct {
+	flag, op string
+}
+
+// compoundRuleTokens splits a COMPOUNDRULE. A flag in parentheses may be
+// several characters, as FLAG long and num need; any other is one flag.
+func (a dictConfig) compoundRuleTokens(rule string) []ruleToken {
+	var out []ruleToken
+	for i := 0; i < len(rule); {
+		switch c := rule[i]; {
+		case c == '*' || c == '?':
+			out = append(out, ruleToken{op: string(c)})
+			i++
+		case c == '(':
+			end := strings.IndexByte(rule[i:], ')')
+			if end < 0 {
+				out = append(out, ruleToken{flag: rule[i+1:]})
+				return out
+			}
+			out = append(out, ruleToken{flag: rule[i+1 : i+end]})
+			i += end + 1
+		default:
+			n := 1
+			if !a.byteFlags {
+				_, n = utf8.DecodeRuneInString(rule[i:])
+			}
+			out = append(out, ruleToken{flag: rule[i : i+n]})
+			i += n
+		}
+	}
+	return out
 }
 
 // singleFlag reads a directive that names one flag.
@@ -593,9 +629,9 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				aff.CompoundRule = make([]string, 0, int(min(max(val, 0), maxCompoundRules)))
 			} else {
 				aff.CompoundRule = append(aff.CompoundRule, parts[1])
-				for _, flag := range aff.parseFlags(parts[1]) {
-					if _, ok := aff.compoundMap[flag]; !ok {
-						aff.compoundMap[flag] = []string{}
+				for _, tok := range aff.compoundRuleTokens(parts[1]) {
+					if _, ok := aff.compoundMap[tok.flag]; tok.flag != "" && !ok {
+						aff.compoundMap[tok.flag] = []string{}
 					}
 				}
 			}
