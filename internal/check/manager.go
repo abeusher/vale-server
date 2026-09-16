@@ -158,9 +158,7 @@ func (mgr *Manager) HasScope(scope string) bool {
 	return found
 }
 
-// RulesForScope names the rules whose scope asks for the `scope` family of
-// blocks -- `sentence`, `paragraph` -- so that a file is only segmented into
-// them when one of those rules will run on it.
+// RulesForScope names the rules whose scope asks for `scope` blocks.
 func (mgr *Manager) RulesForScope(scope string) []string {
 	return mgr.scopeRules[scope]
 }

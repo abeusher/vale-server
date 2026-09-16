@@ -287,9 +287,8 @@ func (f *File) ComputeMetrics() (map[string]interface{}, error) {
 	return BlockMetrics(summarize.NewDocument(f.Summary.String()), f.Metrics), nil
 }
 
-// BlockMetrics computes the metrics of one block: the counts derived from its
-// text, as doc summarizes it, plus the elements it holds. Empty when the text
-// has no words.
+// BlockMetrics computes the metrics of one block: doc's counts plus the
+// elements it holds. Empty when the text has no words.
 func BlockMetrics(doc *summarize.Document, counts map[string]int) map[string]interface{} {
 	params := map[string]interface{}{}
 

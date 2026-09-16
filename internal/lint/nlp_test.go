@@ -10,9 +10,8 @@ import (
 	"github.com/vale-cli/vale/v3/internal/core"
 )
 
-// A file is segmented into sentences only when a sentence-scoped rule runs
-// on it. The demo style has four such rules; a section that turns them all
-// off gets no segmentation, and the rest of its alerts are unchanged.
+// A section that turns off every sentence-scoped rule is not segmented, and
+// its other alerts are unchanged.
 func TestSegmentationFollowsTheFile(t *testing.T) {
 	styles, err := filepath.Abs("../../testdata/styles")
 	if err != nil {

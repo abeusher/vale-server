@@ -8,8 +8,7 @@ import (
 	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
-// Several readability rules over one block is the common shape: a style
-// ships one rule per formula. Each must not summarize the block again.
+// One rule per formula is the common shape; the block is summarized once.
 func BenchmarkReadabilityRules(b *testing.B) {
 	text := strings.Repeat("The quick brown fox jumps over the lazy dog, and "+
 		"then it wanders across the meadow to find its supper. ", 40)

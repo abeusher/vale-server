@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/remeh/sizedwaitgroup"
 
@@ -25,6 +26,13 @@ type Linter struct {
 	glob      *glob.Glob
 	client    *http.Client
 	nonGlobal bool
+
+	// BlockHook, when set, receives every block before its rules run.
+	BlockHook func(nlp.Block)
+
+	// RuleHook, when set, receives each rule's name and what its Run cost.
+	// A hooked run takes the serial path, which is the one that can time a rule.
+	RuleHook func(name string, took time.Duration)
 
 	// adoc holds the Asciidoctor processes this run is using, and adocOnce
 	// starts them the first time an AsciiDoc file is seen.
@@ -238,12 +246,8 @@ func (l *Linter) lintFile(src string) lintResult {
 	}
 
 	// Determine what NLP tasks this particular file needs; the goal is to do
-	// the least amount of work possible.
-	//
-	// The manager knows what some rule in the run asks for; this file pays
-	// only for what a rule that runs on it asks for. A section that turns
-	// the one sentence-scoped rule off, or gives it a level below the
-	// minimum, should not have its files segmented for nothing.
+	// the least amount of work possible. The manager answers for the whole
+	// run, so a file is only segmented when a rule asking for it runs there.
 	file.NLP = l.Manager.AssignNLP(file)
 	file.NLP.Segmentation = file.NLP.Segmentation && l.runsScoped(file, "sentence")
 	file.NLP.Splitting = file.NLP.Splitting && l.runsScoped(file, "paragraph")
@@ -401,12 +405,16 @@ var parallelFloor = 4096
 func (l *Linter) lintBlock(f *core.File, blk nlp.Block, lines, pad int, lookup bool) error {
 	f.StartBlock()
 
+	if l.BlockHook != nil {
+		l.BlockHook(blk)
+	}
+
 	rules := l.inScopeFor(blk)
 
 	// Below the floor the bookkeeping concurrency needs -- two slices the
 	// length of the rule set, per block -- costs more than the rules do. Most
 	// blocks are a paragraph.
-	if len(blk.Text) < parallelFloor {
+	if len(blk.Text) < parallelFloor || l.RuleHook != nil {
 		return l.lintBlockSerial(f, blk, rules, lines, pad, lookup)
 	}
 
@@ -481,7 +489,14 @@ func (l *Linter) lintBlockSerial(f *core.File, blk nlp.Block, rules []scopedRule
 
 		info := chk.Fields()
 
+		var start time.Time
+		if l.RuleHook != nil {
+			start = time.Now()
+		}
 		alerts, err := chk.Run(blk, f, l.Manager.Config)
+		if l.RuleHook != nil {
+			l.RuleHook(name, time.Since(start))
+		}
 		if err != nil {
 			return err
 		}
@@ -580,8 +595,7 @@ func (l *Linter) inScopeFor(blk nlp.Block) []scopedRule {
 	return found
 }
 
-// runsScoped reports whether any rule scoped to the `scope` family of blocks
-// will run on f.
+// runsScoped reports whether a rule scoped to `scope` will run on f.
 func (l *Linter) runsScoped(f *core.File, scope string) bool {
 	rules := l.Manager.Rules()
 	for _, name := range l.Manager.RulesForScope(scope) {

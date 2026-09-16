@@ -52,26 +52,21 @@ type Block struct {
 	// runes converts positions in Text from runes to bytes; see ByteSpan.
 	runes *runeIndex
 
-	// summary holds the block's document statistics once a rule has asked
-	// for them; see Summarize.
+	// summary is the block's document statistics, shared by its copies.
 	summary *summaryCache
 }
 
-// summaryCache builds a block's summarize.Document once. A pointer on the
-// block, so every copy of it shares the result.
+// summaryCache builds a block's summarize.Document once.
 type summaryCache struct {
 	once sync.Once
 	doc  *summarize.Document
 }
 
-// Summarize returns the block's document statistics -- its sentence, word,
-// and syllable counts -- computing them on the first call and returning the
-// same document after that. A `readability` rule and a `metric` rule both
-// read them, and a style ships several of each, so the block is segmented
-// and counted once rather than once per rule. Safe to call concurrently.
+// Summarize returns the block's document statistics, computed once and
+// shared by every rule that reads them. Safe to call concurrently.
 func (b *Block) Summarize() *summarize.Document {
 	if b.summary == nil {
-		// A block built without NewBlock has nowhere to keep the result.
+		// Built without NewBlock, so there is nowhere to keep it.
 		return summarize.NewDocument(b.Text)
 	}
 	b.summary.once.Do(func() {

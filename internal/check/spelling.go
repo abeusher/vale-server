@@ -17,6 +17,8 @@ import (
 	"github.com/vale-cli/vale/v3/internal/system"
 )
 
+// defaultFilters is the reference the scans in spellfilter.go are tested
+// against; the linter runs the scans.
 var defaultFilters = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z]{1}[a-z]+[A-Z]+\w+`),
 	regexp.MustCompile(`[A-Z]+$`),

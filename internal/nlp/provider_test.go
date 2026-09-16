@@ -141,8 +141,7 @@ func TestBlockWithRuns(t *testing.T) {
 	}
 }
 
-// Every rule that measures a block reads the same document, including
-// through a copy of the block, and a block built by hand still has one.
+// Copies of a block share one summary; a hand-built block still has one.
 func TestSummarizeIsSharedByCopies(t *testing.T) {
 	blk := NewBlock("", "One sentence here. And another one.", "text")
 
