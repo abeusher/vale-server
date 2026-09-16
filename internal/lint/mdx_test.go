@@ -44,6 +44,30 @@ func TestMdxHTML(t *testing.T) {
 			[]string{"mdxNode"},
 		},
 		{
+			"a comment followed by prose is a paragraph",
+			"{/* note */}Thiss paragraph.\n",
+			[]string{"<p><!-- note -->Thiss paragraph.</p>"},
+			[]string{"mdxFlowExpression"},
+		},
+		{
+			"an expression ends at its brace, whatever follows",
+			"{/* note */}See [the docs](https://example.com/docs) now.\n\nProse here.\n",
+			[]string{`<a href="https://example.com/docs">`, "<p>Prose here.</p>"},
+			[]string{"mdxFlowExpression"},
+		},
+		{
+			"a fence indented under a component is code",
+			"<Steps>\n  <Step>\n    Run:\n\n    ```bash\n    npm install\n\n    npx it\n    ```\n\n    Prose here.\n  </Step>\n</Steps>\n",
+			[]string{`<pre><code class="language-bash">`, "<p>Prose here.</p>"},
+			[]string{"<p>npm", "<p>npx"},
+		},
+		{
+			"blocks indented four spaces are not code",
+			"    ## Setup\n\n    - one\n    - two\n\n    > quoted\n    > more\n",
+			[]string{"<h2>Setup</h2>", "<li>one</li>", "<li>two</li>", "<blockquote>\n<p>quoted\nmore</p>"},
+			[]string{"<pre>", "<li>one\n<ul>"},
+		},
+		{
 			"a flow expression is skipped",
 			"{(function () {\n  return 'a { in a string'\n})()}\n\nProse here.\n",
 			[]string{`<pre><code class="mdxNode mdxFlowExpression">`, "<p>Prose here.</p>"},

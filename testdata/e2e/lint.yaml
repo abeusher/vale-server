@@ -1214,6 +1214,104 @@ cases:
     want: |
       test.mdx:7:13:T.Marker:'XXX' left in text
 
+  - name: mdx/expression-then-prose
+    about: "#1179 -- a `{...}` expression is a flow expression only when it
+      stands alone on its line. Followed by prose, the line is a paragraph
+      and the expression is inline; a comment renders as one. The expression
+      ends at its closing brace, so a link's `//` after it is prose."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        ---
+        title: t
+        ---
+
+        {/* note */}Thiss paragraph startss with a comment.
+
+        Prose firstt, {/* note */}then a comment mid-line.
+
+        - {/* note */}bullett starting with a comment
+        - normall bullet
+
+        1. {/* note */}numberedd item
+      link.mdx: |
+        ---
+        title: t
+        ---
+
+        {/* note */}See [the docs](https://example.com/docs) for detailss.
+
+        Thiss paragraph is further down the page.
+
+        ## Headingg
+
+        Everythingg after the first paragraph is skipped.
+    args: --output=line --no-exit test.mdx link.mdx
+    exit: 0
+    want: |
+      link.mdx:5:58:Vale.Spelling:Did you really mean 'detailss'?
+      link.mdx:7:1:Vale.Spelling:Did you really mean 'Thiss'?
+      link.mdx:9:4:Vale.Spelling:Did you really mean 'Headingg'?
+      link.mdx:11:1:Vale.Spelling:Did you really mean 'Everythingg'?
+      test.mdx:5:13:Vale.Spelling:Did you really mean 'Thiss'?
+      test.mdx:5:29:Vale.Spelling:Did you really mean 'startss'?
+      test.mdx:7:7:Vale.Spelling:Did you really mean 'firstt'?
+      test.mdx:9:15:Vale.Spelling:Did you really mean 'bullett'?
+      test.mdx:10:3:Vale.Spelling:Did you really mean 'normall'?
+      test.mdx:12:16:Vale.Spelling:Did you really mean 'numberedd'?
+
+  - name: mdx/indented-blocks
+    about: "#1180 -- MDX has no indented code, so a fence, heading, or list
+      indented four or more spaces is what it says, at the top level and
+      under a component that indents its children the way Mintlify and
+      Starlight do."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      fence.mdx: |
+        ---
+        title: t
+        ---
+
+        <Steps>
+          <Step title="Install">
+            Run:
+
+            ```bash
+            npm install
+
+            npx create-next-app
+            ```
+
+            The command creates a projectt directory.
+          </Step>
+        </Steps>
+      top.mdx: |2
+            ## Setupp
+
+            ```bash
+            npm install
+
+            npx create-next-app
+            ```
+
+            - firstt item
+            - secondd item
+    args: --output=line --no-exit fence.mdx top.mdx
+    exit: 0
+    want: |
+      fence.mdx:15:27:Vale.Spelling:Did you really mean 'projectt'?
+      top.mdx:1:8:Vale.Spelling:Did you really mean 'Setupp'?
+      top.mdx:9:7:Vale.Spelling:Did you really mean 'firstt'?
+      top.mdx:10:7:Vale.Spelling:Did you really mean 'secondd'?
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html
