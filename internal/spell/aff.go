@@ -48,53 +48,6 @@ func (f entryForm) virtual() bool {
 	return f.open != nil || (f.wantsAffix && !f.plainAffix)
 }
 
-// derive applies the affix's rules to base, one form per rule that matches.
-func (a dictConfig) derive(af affix, base entryForm) []entryForm {
-	var out []entryForm
-	for i := range af.Rules {
-		r := &af.Rules[i]
-		if r.matcher != nil && !r.matcher.MatchString(base.Word) {
-			continue
-		}
-		f := base
-		f.cont = nil
-		if r.Cont != "" {
-			f.cont = a.parseFlags(r.Cont)
-			f.Flags = union(base.Flags, f.cont)
-		}
-		if hasFlag(f.cont, a.NeedAffixFlag) {
-			f.wantsAffix = true
-		} else {
-			f.plainAffix = true
-		}
-		if hasFlag(f.cont, a.CircumfixFlag) {
-			if base.open != nil && *base.open != af.Type {
-				f.open = nil // paired
-			} else {
-				kind := af.Type
-				f.open = &kind
-			}
-		}
-		if af.Type == Prefix {
-			stripped := base.Word
-			if r.Strip != "" && strings.HasPrefix(stripped, r.Strip) {
-				stripped = stripped[len(r.Strip):]
-			}
-			f.Word = r.AffixText + stripped
-			f.prefix = r
-		} else {
-			stripped := base.Word
-			if r.Strip != "" && strings.HasSuffix(stripped, r.Strip) {
-				stripped = stripped[:len(stripped)-len(r.Strip)]
-			}
-			f.Word = stripped + r.AffixText
-			f.suffix = r
-		}
-		out = append(out, f)
-	}
-	return out
-}
-
 // union returns a followed by what b adds to it.
 func union(a, b []string) []string {
 	out := make([]string, 0, len(a)+len(b))
@@ -180,6 +133,13 @@ type dictConfig struct {
 	// Ignored names the directives the file used that this reader does not
 	// implement, in the order they were first seen.
 	Ignored []string
+
+	index reverseIndex
+
+	// byteFlags says a flag is one byte, as Hunspell reads them from a
+	// UTF-8 file without FLAG: a non-ASCII flag character is then two
+	// flags, and a class name is its first byte.
+	byteFlags bool
 }
 
 // compoundingEnabled reports whether the dictionary uses affix-flag-based
@@ -215,7 +175,20 @@ func (a dictConfig) parseFlags(flagStr string) []string {
 			flags = append(flags, flagStr[i:i+2])
 		}
 		return flags
-	default: // "ASCII" or "UTF-8"
+	case "UTF-8":
+		flags := make([]string, 0, len(flagStr))
+		for _, r := range flagStr {
+			flags = append(flags, string(r))
+		}
+		return flags
+	default:
+		if a.byteFlags {
+			flags := make([]string, 0, len(flagStr))
+			for i := 0; i < len(flagStr); i++ {
+				flags = append(flags, flagStr[i:i+1])
+			}
+			return flags
+		}
 		flags := make([]string, 0, len(flagStr))
 		for _, r := range flagStr {
 			flags = append(flags, string(r))
@@ -224,8 +197,16 @@ func (a dictConfig) parseFlags(flagStr string) []string {
 	}
 }
 
+// singleFlag reads a directive that names one flag.
+func (a dictConfig) singleFlag(s string) string {
+	if flags := a.parseFlags(s); len(flags) > 0 {
+		return flags[0]
+	}
+	return s
+}
+
 // expand returns the words a `.dic` entry generates.
-func (a dictConfig) expand(entry string, out []string) ([]string, error) {
+func (a *dictConfig) expand(entry string, out []string) ([]string, error) {
 	forms, err := a.expandEntry(entry)
 	if err != nil {
 		return nil, err
@@ -238,7 +219,7 @@ func (a dictConfig) expand(entry string, out []string) ([]string, error) {
 }
 
 // expandEntry returns every form a `.dic` entry generates, with its flags.
-func (a dictConfig) expandEntry(entry string) ([]entryForm, error) {
+func (a *dictConfig) expandEntry(entry string) ([]entryForm, error) {
 	word, keyString, found := strings.Cut(entry, "/")
 	if !found {
 		return []entryForm{{Word: entry}}, nil
@@ -246,22 +227,34 @@ func (a dictConfig) expandEntry(entry string) ([]entryForm, error) {
 	if word == "" || keyString == "" {
 		return nil, fmt.Errorf("slash char found in first or last position")
 	}
+	return a.expander(nil, nil).root(word, a.parseFlags(keyString)), nil
+}
 
-	flags := a.parseFlags(keyString)
-	for _, key := range flags {
-		if _, ok := a.compoundMap[key]; ok {
-			a.compoundMap[key] = append(a.compoundMap[key], word)
-		}
+// expander generates a root's forms. With allowed set, only forms whose key
+// is in it are kept, which confines the walk to the path toward one word.
+type expander struct {
+	a       *dictConfig
+	allowed map[string]struct{}
+	key     func(string) string
+}
+
+func (a *dictConfig) expander(allowed map[string]struct{}, key func(string) string) expander {
+	if key == nil {
+		key = func(s string) string { return s }
 	}
+	return expander{a: a, allowed: allowed, key: key}
+}
 
+// root returns the forms of a root with the given flags.
+func (e expander) root(word string, flags []string) []entryForm {
 	stem := entryForm{Word: word, Flags: flags, cont: flags,
-		wantsAffix: hasFlag(flags, a.NeedAffixFlag)}
-	return a.emit(stem, 0), nil
+		wantsAffix: hasFlag(flags, e.a.NeedAffixFlag)}
+	return e.emit(stem, 0)
 }
 
 // emit returns f, unless it is only a step toward another form, and then
 // the forms the affixes its flags name build on it.
-func (a dictConfig) emit(f entryForm, depth int) []entryForm {
+func (e expander) emit(f entryForm, depth int) []entryForm {
 	var out []entryForm
 	if !f.virtual() {
 		out = append(out, f)
@@ -269,21 +262,21 @@ func (a dictConfig) emit(f entryForm, depth int) []entryForm {
 	if depth > maxAffixDepth {
 		return out
 	}
-	return append(out, a.affixed(f, f.cont, depth)...)
+	return append(out, e.affixed(f, f.cont, depth)...)
 }
 
 // affixed builds the forms the affixes named by keys make from base.
-func (a dictConfig) affixed(base entryForm, keys []string, depth int) []entryForm {
+func (e expander) affixed(base entryForm, keys []string, depth int) []entryForm {
 	var out []entryForm
 	prefixes := make([]affix, 0, 5)
 	suffixes := make([]affix, 0, 5)
 	for _, key := range keys {
-		af, ok := a.AffixMap[key]
+		af, ok := e.a.AffixMap[key]
 		if !ok {
 			continue
 		}
 		if !af.CrossProduct {
-			out = a.emitAll(a.derive(af, base), out, depth)
+			out = e.emitAll(e.derive(af, base), out, depth)
 			continue
 		}
 		if af.Type == Prefix {
@@ -294,16 +287,16 @@ func (a dictConfig) affixed(base entryForm, keys []string, depth int) []entryFor
 	}
 
 	for _, suf := range suffixes {
-		out = a.emitAll(a.derive(suf, base), out, depth)
+		out = e.emitAll(e.derive(suf, base), out, depth)
 	}
 	for _, pre := range prefixes {
-		prefixed := a.derive(pre, base)
-		out = a.emitAll(prefixed, out, depth)
+		prefixed := e.derive(pre, base)
+		out = e.emitAll(prefixed, out, depth)
 
 		// now do cross product
 		for _, suf := range suffixes {
 			for _, pw := range prefixed {
-				out = a.emitAll(a.derive(suf, pw), out, depth)
+				out = e.emitAll(e.derive(suf, pw), out, depth)
 			}
 		}
 	}
@@ -314,9 +307,64 @@ func (a dictConfig) affixed(base entryForm, keys []string, depth int) []entryFor
 //
 // This is the step Hunspell calls twofold affixation: `SFX 1 0 t/34,22 e`
 // says that after the rule builds its form, classes 34 and 22 apply to that.
-func (a dictConfig) emitAll(forms []entryForm, out []entryForm, depth int) []entryForm {
+func (e expander) emitAll(forms []entryForm, out []entryForm, depth int) []entryForm {
 	for _, f := range forms {
-		out = append(out, a.emit(f, depth+1)...)
+		out = append(out, e.emit(f, depth+1)...)
+	}
+	return out
+}
+
+// derive applies the affix's rules to base, one form per rule that matches.
+func (e expander) derive(af affix, base entryForm) []entryForm {
+	a := e.a
+	var out []entryForm
+	for i := range af.Rules {
+		// The condition is tested last: building the form and checking it
+		// against allowed is cheaper than the regular expression.
+		r := &af.Rules[i]
+		f := base
+		f.cont = nil
+		if r.Cont != "" {
+			f.cont = a.parseFlags(r.Cont)
+			f.Flags = union(base.Flags, f.cont)
+		}
+		if hasFlag(f.cont, a.NeedAffixFlag) {
+			f.wantsAffix = true
+		} else {
+			f.plainAffix = true
+		}
+		if hasFlag(f.cont, a.CircumfixFlag) {
+			if base.open != nil && *base.open != af.Type {
+				f.open = nil // paired
+			} else {
+				kind := af.Type
+				f.open = &kind
+			}
+		}
+		if af.Type == Prefix {
+			stripped := base.Word
+			if r.Strip != "" && strings.HasPrefix(stripped, r.Strip) {
+				stripped = stripped[len(r.Strip):]
+			}
+			f.Word = r.AffixText + stripped
+			f.prefix = r
+		} else {
+			stripped := base.Word
+			if r.Strip != "" && strings.HasSuffix(stripped, r.Strip) {
+				stripped = stripped[:len(stripped)-len(r.Strip)]
+			}
+			f.Word = stripped + r.AffixText
+			f.suffix = r
+		}
+		if e.allowed != nil {
+			if _, ok := e.allowed[e.key(f.Word)]; !ok {
+				continue
+			}
+		}
+		if r.matcher != nil && !r.matcher.MatchString(base.Word) {
+			continue
+		}
+		out = append(out, f)
 	}
 	return out
 }
@@ -391,6 +439,26 @@ type compoundPattern struct {
 	repl               string
 }
 
+// conditionPattern turns an affix condition into a regular expression. A
+// hyphen inside a Hunspell class is a literal, never a range.
+func conditionPattern(cond string) string {
+	var b strings.Builder
+	inClass := false
+	for _, r := range cond {
+		switch {
+		case r == '[':
+			inClass = true
+		case r == ']':
+			inClass = false
+		case r == '-' && inClass:
+			b.WriteString(`\-`)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 // parsePatternSide reads `chars[/flag]`, returning the characters, the
 // flag, and whether `0` asked for an unaffixed stem.
 func parsePatternSide(s string) (string, string, bool) {
@@ -404,15 +472,6 @@ func parsePatternSide(s string) (string, string, bool) {
 // hasFlag reports whether flag is set and among flags.
 func hasFlag(flags []string, flag string) bool {
 	return flag != "" && stringIn(flag, flags)
-}
-
-// entryHas reports whether a `.dic` entry carries flag.
-func (a dictConfig) entryHas(entry, flag string) bool {
-	if flag == "" {
-		return false
-	}
-	_, flags, found := strings.Cut(entry, "/")
-	return found && hasFlag(a.parseFlags(flags), flag)
 }
 
 func stringIn(s string, list []string) bool {
@@ -456,6 +515,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 	}
 	sawBreakCount := false
 	sawAliasCount := false
+	aff.byteFlags = true
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -467,6 +527,13 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 		}
 
 		switch parts[0] {
+		case "SET":
+			// Decoded before parsing; see decodeDictionary. A UTF-8 file's
+			// flags are bytes unless FLAG says otherwise.
+			if len(parts) >= 2 {
+				upper := strings.ToUpper(parts[1])
+				aff.byteFlags = upper == "UTF-8" || upper == "UTF8"
+			}
 		case "TRY":
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("TRY stanza had %d fields, expected 2", len(parts))
@@ -513,7 +580,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("ONLYINCOMPOUND stanza had %d fields, expected 2", len(parts))
 			}
-			aff.CompoundOnly = parts[1]
+			aff.CompoundOnly = aff.singleFlag(parts[1])
 		case "COMPOUNDRULE":
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("COMPOUNDRULE stanza had %d fields, expected 2", len(parts))
@@ -536,22 +603,22 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("NOSUGGEST stanza had %d fields, expected 2", len(parts))
 			}
-			aff.NoSuggestFlag = parts[1]
+			aff.NoSuggestFlag = aff.singleFlag(parts[1])
 		case "FORBIDDENWORD":
 			if len(parts) >= 2 {
-				aff.ForbiddenFlag = parts[1]
+				aff.ForbiddenFlag = aff.singleFlag(parts[1])
 			}
 		case "NEEDAFFIX", "PSEUDOROOT":
 			if len(parts) >= 2 {
-				aff.NeedAffixFlag = parts[1]
+				aff.NeedAffixFlag = aff.singleFlag(parts[1])
 			}
 		case "KEEPCASE":
 			if len(parts) >= 2 {
-				aff.KeepCaseFlag = parts[1]
+				aff.KeepCaseFlag = aff.singleFlag(parts[1])
 			}
 		case "CIRCUMFIX":
 			if len(parts) >= 2 {
-				aff.CircumfixFlag = parts[1]
+				aff.CircumfixFlag = aff.singleFlag(parts[1])
 			}
 		case "CHECKCOMPOUNDDUP":
 			aff.CheckCompoundDup = true
@@ -603,31 +670,31 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			aff.Aliases = append(aff.Aliases, parts[1])
 		case "COMPOUNDFLAG":
 			if len(parts) >= 2 {
-				aff.CompoundFlag = parts[1]
+				aff.CompoundFlag = aff.singleFlag(parts[1])
 			}
 		case "COMPOUNDBEGIN":
 			if len(parts) >= 2 {
-				aff.CompoundBegin = parts[1]
+				aff.CompoundBegin = aff.singleFlag(parts[1])
 			}
 		case "COMPOUNDMIDDLE":
 			if len(parts) >= 2 {
-				aff.CompoundMiddle = parts[1]
+				aff.CompoundMiddle = aff.singleFlag(parts[1])
 			}
 		case "COMPOUNDEND":
 			if len(parts) >= 2 {
-				aff.CompoundEnd = parts[1]
+				aff.CompoundEnd = aff.singleFlag(parts[1])
 			}
 		case "COMPOUNDPERMITFLAG":
 			if len(parts) >= 2 {
-				aff.CompoundPermitFlag = parts[1]
+				aff.CompoundPermitFlag = aff.singleFlag(parts[1])
 			}
 		case "COMPOUNDFORBIDFLAG":
 			if len(parts) >= 2 {
-				aff.CompoundForbidFlag = parts[1]
+				aff.CompoundForbidFlag = aff.singleFlag(parts[1])
 			}
 		case "FORCEUCASE":
 			if len(parts) >= 2 {
-				aff.ForceUCaseFlag = parts[1]
+				aff.ForceUCaseFlag = aff.singleFlag(parts[1])
 			}
 		case "WORDCHARS":
 			if len(parts) < 2 {
@@ -674,12 +741,12 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 					return nil, err
 				}
 				// this is a new Affix!
-				aff.AffixMap[parts[1]] = affix{
+				aff.AffixMap[aff.singleFlag(parts[1])] = affix{
 					Type:         atype,
 					CrossProduct: cross,
 				}
 			case sections >= 4:
-				flag := parts[1]
+				flag := aff.singleFlag(parts[1])
 				a, ok := aff.AffixMap[flag]
 				if !ok {
 					return nil, fmt.Errorf("got rules for flag %q but no definition", flag)
@@ -700,7 +767,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				var matcher *regexp.Regexp
 				var err error
 				if cond != "." {
-					pat := cond
+					pat := conditionPattern(cond)
 					if a.Type == Prefix {
 						pat = "^" + pat
 					} else {
@@ -756,5 +823,6 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 		return nil, err
 	}
 
+	aff.buildIndex()
 	return &aff, nil
 }

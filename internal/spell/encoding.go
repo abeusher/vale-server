@@ -1,0 +1,69 @@
+package spell
+
+import (
+	"bufio"
+	"bytes"
+	"fmt"
+	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/encoding/ianaindex"
+)
+
+// utf8BOM is the byte order mark some dictionaries start with.
+var utf8BOM = []byte("\xef\xbb\xbf")
+
+// decodeDictionary converts a dictionary's files to UTF-8, as the reader
+// expects. The `.aff` says how it is encoded with SET; Hunspell's default is
+// ISO8859-1, but a file without SET that is valid UTF-8 is read as UTF-8, as
+// it always was here.
+func decodeDictionary(aff, dic []byte) ([]byte, []byte, error) {
+	aff = bytes.TrimPrefix(aff, utf8BOM)
+	dic = bytes.TrimPrefix(dic, utf8BOM)
+
+	charset := declaredCharset(aff)
+	switch {
+	case charset == "" && utf8.Valid(aff) && utf8.Valid(dic):
+		return aff, dic, nil
+	case charset == "":
+		charset = "ISO8859-1"
+	case strings.EqualFold(charset, "UTF-8"), strings.EqualFold(charset, "UTF8"):
+		return aff, dic, nil
+	}
+
+	enc, err := lookupCharset(charset)
+	if err != nil {
+		return nil, nil, err
+	}
+	if aff, err = enc.NewDecoder().Bytes(aff); err != nil {
+		return nil, nil, fmt.Errorf("decode .aff as %s: %w", charset, err)
+	}
+	if dic, err = enc.NewDecoder().Bytes(dic); err != nil {
+		return nil, nil, fmt.Errorf("decode .dic as %s: %w", charset, err)
+	}
+	return aff, dic, nil
+}
+
+// declaredCharset returns the SET value of a `.aff`, or "".
+func declaredCharset(aff []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(aff))
+	for scanner.Scan() {
+		fields := strings.Fields(scanner.Text())
+		if len(fields) >= 2 && fields[0] == "SET" {
+			return fields[1]
+		}
+	}
+	return ""
+}
+
+// lookupCharset finds an encoding by the name a `.aff` uses; Hunspell writes
+// `ISO8859-1` where the registry spells it `ISO-8859-1`.
+func lookupCharset(name string) (encoding.Encoding, error) {
+	iana := strings.Replace(strings.ToUpper(name), "ISO8859-", "ISO-8859-", 1)
+	enc, err := ianaindex.IANA.Encoding(iana)
+	if err != nil || enc == nil {
+		return nil, fmt.Errorf("SET %s: unsupported encoding", name)
+	}
+	return enc, nil
+}

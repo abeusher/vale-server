@@ -2,12 +2,14 @@ package spell
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/adrg/strutil"
@@ -20,22 +22,29 @@ type wordMatch struct {
 }
 
 type goSpell struct {
-	dict  map[string]struct{}
-	exact map[string]struct{} // KEEPCASE words, matched as written
-	upper map[string]struct{} // the upper-cased form of each word with a capital
+	affix *dictConfig
+
+	// roots holds the `.dic` entries by word, one per homonym line. Their
+	// forms are generated on lookup rather than at load, which is what
+	// keeps an inflected language's dictionary in memory.
+	roots map[string][]rootEntry
+	// upperRoots maps the upper-cased form of each root with a capital to
+	// the roots it stands for, Hunspell's hidden upper-case homonym.
+	upperRoots map[string][]string
 
 	// listed holds the words an ignore list added. They match as written
 	// or lower-cased, whatever the input's case, as they always have.
 	listed map[string]struct{}
 
-	// forbidden holds FORBIDDENWORD forms, which no other path may accept.
-	forbidden map[string]struct{}
+	// forbiddenRoots holds the FORBIDDENWORD entries; their forms are not
+	// words, and no other reading of one may accept it.
+	forbiddenRoots map[string][]rootEntry
 
-	// segments holds the words a compound may be built from, and where.
-	segments map[string]segment
-	// noCompound holds the entries COMPOUNDFORBIDFLAG keeps out, whatever
-	// their other forms allow.
-	noCompound map[string]struct{}
+	// Lookups are memoized, since a document repeats its words and a
+	// checker is shared by the files linted in parallel.
+	mu       sync.Mutex
+	spelled  map[string]bool
+	segments map[string]segmentUse
 	// pairs holds the run-together form of each two-word entry, which is
 	// not a compound.
 	pairs map[string]struct{}
@@ -57,6 +66,17 @@ type goSpell struct {
 	patterns    []compoundPattern
 	breaks      []breakRule
 	ignored     []string // .aff directives the reader does not implement
+}
+
+// rootEntry is one `.dic` line's flags.
+type rootEntry struct {
+	flags []string
+}
+
+// segmentUse is a cached segment lookup.
+type segmentUse struct {
+	seg segment
+	ok  bool
 }
 
 // breakRule is one Hunspell BREAK pattern: a literal that a word may be
@@ -112,13 +132,15 @@ func (s *goSpell) inputConversion(raw []byte) string {
 // returns true if added
 // return false is already exists
 func (s *goSpell) addWordRaw(word string) bool {
-	_, ok := s.dict[word]
-	if ok {
+	if _, ok := s.listed[word]; ok {
 		// already exists
 		return false
 	}
-	s.dict[word] = struct{}{}
+	s.roots[word] = append(s.roots[word], rootEntry{})
 	s.listed[word] = struct{}{}
+	s.mu.Lock()
+	s.spelled = make(map[string]bool)
+	s.mu.Unlock()
 	return true
 }
 
@@ -158,14 +180,10 @@ func (s *goSpell) addWordList(r io.Reader) ([]string, error) {
 }
 
 func (s *goSpell) keys() []string {
-	keys := make([]string, len(s.dict))
-
-	i := 0
-	for k := range s.dict {
-		keys[i] = k
-		i++
+	keys := make([]string, 0, len(s.roots))
+	for k := range s.roots {
+		keys = append(keys, k)
 	}
-
 	return keys
 }
 
@@ -175,12 +193,35 @@ func (s *goSpell) suggest(word string) []wordMatch {
 	// Distance is measured case-insensitively; the case comes back below.
 	lower := strings.ToLower(word)
 
-	matches := []wordMatch{}
+	// Roots are ranked first, and the forms of the closest ones after, so
+	// an inflected form is still found without generating every form.
+	roots := []wordMatch{}
 	for _, option := range s.keys() {
 		sim := strutil.Similarity(option, lower, metric)
-		matches = append(matches, wordMatch{option, sim})
+		roots = append(roots, wordMatch{option, sim})
+	}
+	sort.Slice(roots, func(i, j int) bool {
+		return roots[i].score > roots[j].score
+	})
+	if len(roots) > suggestRoots {
+		roots = roots[:suggestRoots]
 	}
 
+	seen := map[string]struct{}{}
+	matches := []wordMatch{}
+	e := s.affix.expander(nil, nil)
+	for _, r := range roots {
+		for _, entry := range s.roots[r.word] {
+			for _, f := range e.root(r.word, entry.flags) {
+				if _, ok := seen[f.Word]; ok || len(seen) > suggestForms {
+					continue
+				}
+				seen[f.Word] = struct{}{}
+				sim := strutil.Similarity(f.Word, lower, metric)
+				matches = append(matches, wordMatch{f.Word, sim})
+			}
+		}
+	}
 	sort.Slice(matches, func(i, j int) bool {
 		return matches[i].score > matches[j].score
 	})
@@ -204,6 +245,13 @@ func (s *goSpell) suggest(word string) []wordMatch {
 
 	return hits
 }
+
+// suggestRoots is how many of the closest roots are expanded for
+// suggestions, and suggestForms caps the forms considered.
+const (
+	suggestRoots = 20
+	suggestForms = 20000
+)
 
 // allUpper reports whether word has letters and every one is upper-case.
 func allUpper(word string) bool {
@@ -230,7 +278,70 @@ func initialUpper(word string) bool {
 
 // spell checks to see if a given word is in the internal dictionaries
 func (s *goSpell) spell(word string) bool {
-	return s.spellDepth(word, 0)
+	s.mu.Lock()
+	ok, known := s.spelled[word]
+	s.mu.Unlock()
+	if known {
+		return ok
+	}
+
+	ok = s.spellDepth(word, 0)
+
+	s.mu.Lock()
+	if len(s.spelled) > cacheMax {
+		s.spelled = make(map[string]bool)
+	}
+	s.spelled[word] = ok
+	s.mu.Unlock()
+	return ok
+}
+
+// cacheMax bounds the lookup caches.
+const cacheMax = 1 << 16
+
+// isForbidden reports whether a FORBIDDENWORD entry generates word. Hunspell
+// reads homonyms in order and the first decides, so a word that is itself a
+// root of another entry stays valid.
+func (s *goSpell) isForbidden(word string) bool {
+	if len(s.forbiddenRoots) == 0 {
+		return false
+	}
+	if _, ok := s.roots[word]; ok {
+		return false
+	}
+	return len(s.readings(word, false, s.forbiddenRoots)) > 0
+}
+
+// isWord reports whether word is a form some entry generates and may stand
+// on its own. A folded word, one whose case was changed to look it up, is
+// not a KEEPCASE form.
+func (s *goSpell) isWord(word string, folded bool) bool {
+	if s.isForbidden(word) {
+		return false
+	}
+	for _, f := range s.analyses(word, false) {
+		if hasFlag(f.Flags, s.affix.CompoundOnly) ||
+			(folded && hasFlag(f.Flags, s.affix.KeepCaseFlag)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// isWordUpper reports whether an all-caps word is the upper-cased form of
+// one some entry generates.
+func (s *goSpell) isWordUpper(word string) bool {
+	for _, f := range s.analyses(word, true) {
+		if s.isForbidden(f.Word) {
+			continue
+		}
+		if hasFlag(f.Flags, s.affix.CompoundOnly) || hasFlag(f.Flags, s.affix.KeepCaseFlag) {
+			continue
+		}
+		return true
+	}
+	return false
 }
 
 // caseType is Hunspell's classification of a word by its capitals.
@@ -286,7 +397,7 @@ func lowerFirst(s string) string {
 
 // spellDepth is spell with a count of how many BREAK splits led here.
 func (s *goSpell) spellDepth(word string, depth int) bool {
-	if _, ok := s.forbidden[word]; ok {
+	if s.isForbidden(word) {
 		return false
 	}
 	// A trailing period is an abbreviation's, or the sentence's.
@@ -295,10 +406,7 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 			return true
 		}
 	}
-	if _, ok := s.exact[word]; ok {
-		return true
-	}
-	if _, ok := s.dict[word]; ok {
+	if s.isWord(word, false) {
 		return true
 	}
 
@@ -311,21 +419,15 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 	case noCap, huhCap:
 		// As written only: fOO is not foo.
 	case initCap:
-		if _, ok := s.dict[lower]; ok {
+		if s.isWord(lower, true) {
 			return true
 		}
 	case allCap:
-		if _, ok := s.upper[word]; ok {
-			return true
-		}
-		if _, ok := s.dict[lower]; ok {
-			return true
-		}
-		if _, ok := s.dict[capitalize(lower)]; ok {
+		if s.isWordUpper(word) || s.isWord(lower, true) || s.isWord(capitalize(lower), true) {
 			return true
 		}
 	case huhInitCap:
-		if _, ok := s.dict[lowerFirst(word)]; ok {
+		if s.isWord(lowerFirst(word), true) {
 			return true
 		}
 	}
@@ -359,12 +461,8 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 	}
 
 	// Maybe a word with units? e.g. 100GB
-	units := isNumberUnits(word)
-	if units != "" {
-		// dictionary appears to have list of units
-		if _, ok := s.dict[units]; ok {
-			return true
-		}
+	if units := isNumberUnits(word); units != "" && s.isWord(units, false) {
+		return true
 	}
 
 	return s.breakParts(word, depth)
@@ -417,8 +515,40 @@ func (s *goSpell) breakParts(word string, depth int) bool {
 // dictionary's to handle: a German dictionary generates the lower-case
 // interior forms itself, with prefix rules that strip the capital.
 func (s *goSpell) segment(word string) (segment, bool) {
-	seg, ok := s.segments[word]
-	return seg, ok
+	s.mu.Lock()
+	use, cached := s.segments[word]
+	s.mu.Unlock()
+	if cached {
+		return use.seg, use.ok
+	}
+
+	var merged segment
+	found := false
+	if !s.isForbidden(word) {
+		for _, f := range s.analyses(word, false) {
+			if f.prefix == nil && f.suffix == nil && hasFlag(f.Flags, s.affix.CompoundForbidFlag) {
+				// The entry itself is kept out, whatever its other forms allow.
+				found = false
+				break
+			}
+			seg, ok := s.affix.compoundUse(f)
+			if !ok {
+				continue
+			}
+			seg.keep = hasFlag(f.Flags, s.affix.KeepCaseFlag)
+			if found {
+				seg = merged.merge(seg)
+			}
+			merged, found = seg, true
+		}
+	}
+	s.mu.Lock()
+	if len(s.segments) > cacheMax {
+		s.segments = make(map[string]segmentUse)
+	}
+	s.segments[word] = segmentUse{seg: merged, ok: found}
+	s.mu.Unlock()
+	return merged, found
 }
 
 // isCompound reports whether word is built from segments the dictionary's
@@ -579,7 +709,7 @@ func (s *goSpell) repMakesWord(texts ...string) bool {
 		for _, rep := range s.reps {
 			for at := strings.Index(text, rep[0]); at >= 0; {
 				candidate := text[:at] + rep[1] + text[at+len(rep[0]):]
-				if _, ok := s.dict[candidate]; ok {
+				if s.isWord(candidate, false) {
 					return true
 				}
 				next := strings.Index(text[at+1:], rep[0])
@@ -660,10 +790,24 @@ func capitalize(s string) string {
 // newGoSpellReader creates a speller from io.Readers for
 // Hunspell files
 func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
-	affix, err := newDictConfig(aff)
+	affBytes, err := io.ReadAll(aff)
 	if err != nil {
 		return nil, err
 	}
+	dicBytes, err := io.ReadAll(dic)
+	if err != nil {
+		return nil, err
+	}
+	affBytes, dicBytes, err = decodeDictionary(affBytes, dicBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	affix, err := newDictConfig(bytes.NewReader(affBytes))
+	if err != nil {
+		return nil, err
+	}
+	dic = bytes.NewReader(dicBytes)
 
 	scanner := bufio.NewScanner(dic)
 	// get first line
@@ -672,38 +816,35 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	}
 
 	gs := goSpell{
-		// TODO: Use fixed size from first list?
-		dict:        make(map[string]struct{}),
-		exact:       make(map[string]struct{}),
-		upper:       make(map[string]struct{}),
-		listed:      make(map[string]struct{}),
-		compounds:   make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
-		splitter:    newSplitter(affix.WordChars),
-		canCompound: affix.compoundingEnabled(),
-		compoundMin: affix.CompoundMin,
-		checkDup:    affix.CheckCompoundDup,
-		checkTriple: affix.CheckCompoundTriple,
-		simplified:  affix.SimplifiedTriple,
-		checkCase:   affix.CheckCompoundCase,
-		checkRep:    affix.CheckCompoundRep,
-		wordMax:     affix.CompoundWordMax,
-		syllableMax: affix.CompoundSyllable,
-		vowels:      affix.CompoundVowels,
-		reps:        affix.Replacements,
-		patterns:    affix.CompoundPatterns,
-		breaks:      newBreakRules(affix.Break),
-		ignored:     affix.Ignored,
-		forbidden:   make(map[string]struct{}),
-		segments:    make(map[string]segment),
-		noCompound:  make(map[string]struct{}),
-		pairs:       make(map[string]struct{}),
+		affix:          affix,
+		roots:          make(map[string][]rootEntry),
+		upperRoots:     make(map[string][]string),
+		listed:         make(map[string]struct{}),
+		compounds:      make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
+		splitter:       newSplitter(affix.WordChars),
+		canCompound:    affix.compoundingEnabled(),
+		compoundMin:    affix.CompoundMin,
+		checkDup:       affix.CheckCompoundDup,
+		checkTriple:    affix.CheckCompoundTriple,
+		simplified:     affix.SimplifiedTriple,
+		checkCase:      affix.CheckCompoundCase,
+		checkRep:       affix.CheckCompoundRep,
+		wordMax:        affix.CompoundWordMax,
+		syllableMax:    affix.CompoundSyllable,
+		vowels:         affix.CompoundVowels,
+		reps:           affix.Replacements,
+		patterns:       affix.CompoundPatterns,
+		breaks:         newBreakRules(affix.Break),
+		ignored:        affix.Ignored,
+		forbiddenRoots: make(map[string][]rootEntry),
+		segments:       make(map[string]segmentUse),
+		spelled:        make(map[string]bool),
+		pairs:          make(map[string]struct{}),
 	}
 	if !affix.BreakDeclared {
 		gs.breaks = newBreakRules(defaultBreaks)
 	}
 
-	forbidden := []string{}
-	stems := map[string]struct{}{} // of the entries read so far that are not forbidden
 	for scanner.Scan() {
 		line := scanner.Text()
 		// A .dic entry is `word/flags` optionally followed by whitespace-
@@ -717,6 +858,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		//
 		// Both tab- and space-separated morphology occur in the wild -- the
 		// Danish dictionary from stavekontrolden.dk uses spaces. See #1065.
+		//
 		// The word ends at the first tab; morphology follows it.
 		line, _, _ = strings.Cut(line, "\t")
 		fields := strings.Fields(line)
@@ -729,85 +871,38 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		// run-together form is not a compound.
 		if len(fields) > 1 && !isMorphField(fields[1]) {
 			gs.pairs[fields[0]+fields[1]] = struct{}{}
-			gs.dict[fields[0]+" "+fields[1]] = struct{}{}
+			gs.addRoot(fields[0]+" "+fields[1], nil)
 			continue
 		}
 
-		forms, expandErr := affix.expandEntry(line)
-		if expandErr != nil {
+		word, keyString, found := strings.Cut(line, "/")
+		if word == "" || (found && keyString == "") {
 			// Skip malformed entries (e.g., a line with flags but no word)
 			// rather than abandoning the entire dictionary, which would leave
 			// every word unrecognized and flagged. See #1065.
 			continue
 		}
+		var flags []string
+		if found {
+			flags = affix.parseFlags(keyString)
+		}
 
-		if len(forms) == 0 {
+		if hasFlag(flags, affix.ForbiddenFlag) {
+			gs.forbiddenRoots[word] = append(gs.forbiddenRoots[word], rootEntry{flags: flags})
+			gs.noteUpper(word)
 			continue
 		}
 
-		switch {
-		case affix.entryHas(line, affix.ForbiddenFlag):
-			// Hunspell reads homonyms in order and the first decides, so
-			// an earlier entry keeps its stem valid.
-			for _, f := range forms {
-				if _, seen := stems[f.Word]; !seen {
-					forbidden = append(forbidden, f.Word)
-				}
-			}
-			continue
-		case affix.entryHas(line, affix.KeepCaseFlag):
-			for _, f := range forms {
-				gs.exact[f.Word] = struct{}{}
-				if seg, ok := affix.compoundUse(f); ok {
-					seg.keep = true
-					if have, known := gs.segments[f.Word]; known {
-						seg = have.merge(seg)
-					}
-					gs.segments[f.Word] = seg
-				}
-			}
-		default:
-			for _, f := range forms {
-				if !hasFlag(f.Flags, affix.CompoundOnly) {
-					gs.dict[f.Word] = struct{}{}
-				}
-				if seg, ok := affix.compoundUse(f); ok {
-					if have, known := gs.segments[f.Word]; known {
-						seg = have.merge(seg)
-					}
-					gs.segments[f.Word] = seg
-				} else if f.prefix == nil && f.suffix == nil &&
-					hasFlag(f.Flags, affix.CompoundForbidFlag) {
-					gs.noCompound[f.Word] = struct{}{}
-				}
+		for _, key := range flags {
+			if _, ok := affix.compoundMap[key]; ok {
+				affix.compoundMap[key] = append(affix.compoundMap[key], word)
 			}
 		}
-		stem, _, _ := strings.Cut(line, "/")
-		stems[stem] = struct{}{}
+		gs.addRoot(word, flags)
 	}
 
 	if err = scanner.Err(); err != nil {
 		return nil, err
-	}
-
-	for word := range gs.noCompound {
-		delete(gs.segments, word)
-	}
-
-	// Hunspell keeps an upper-cased homonym of every capitalized or
-	// mixed-case entry, so OPENOFFICE.ORG matches OpenOffice.org.
-	for word := range gs.dict {
-		if word != strings.ToLower(word) {
-			gs.upper[strings.ToUpper(word)] = struct{}{}
-		}
-	}
-
-	// A forbidden word overrides any entry that generates it.
-	for _, word := range forbidden {
-		delete(gs.dict, word)
-		delete(gs.exact, word)
-		delete(gs.segments, word)
-		gs.forbidden[word] = struct{}{}
 	}
 
 	for _, compoundRule := range affix.CompoundRule {
@@ -837,6 +932,23 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		gs.ireplacer = strings.NewReplacer(affix.IconvReplacements...)
 	}
 	return &gs, nil
+}
+
+// addRoot records a `.dic` entry.
+func (s *goSpell) addRoot(word string, flags []string) {
+	s.roots[word] = append(s.roots[word], rootEntry{flags: flags})
+	s.noteUpper(word)
+}
+
+// noteUpper indexes a root with a capital by its upper-cased form.
+func (s *goSpell) noteUpper(word string) {
+	if word == strings.ToLower(word) {
+		return
+	}
+	upper := strings.ToUpper(word)
+	if !stringIn(word, s.upperRoots[upper]) {
+		s.upperRoots[upper] = append(s.upperRoots[upper], word)
+	}
 }
 
 // newGoSpell from AFF and DIC Hunspell filenames

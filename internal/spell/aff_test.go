@@ -516,7 +516,7 @@ SFX A 0 s .
 		t.Fatalf("newDictConfig error: %v", err)
 	}
 
-	want := []string{"SET", "CHECKSHARPS", "MAP"}
+	want := []string{"CHECKSHARPS", "MAP"}
 	if !reflect.DeepEqual(aff.Ignored, want) {
 		t.Errorf("Ignored = %v, want %v", aff.Ignored, want)
 	}

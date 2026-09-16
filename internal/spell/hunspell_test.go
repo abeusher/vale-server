@@ -1,15 +1,12 @@
 package spell
 
 import (
-	"bufio"
 	"bytes"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
-
-	"golang.org/x/text/encoding/ianaindex"
 )
 
 // hunspellUnsupported names the fixtures the checker does not pass yet, with
@@ -42,7 +39,6 @@ var hunspellUnsupported = map[string]string{
 	"nepali":                     "IGNORE",
 	"right_to_left_mark":         "IGNORE",
 	"gh353":                      "non-ASCII digits",
-	"flagutf8":                   "FLAG UTF-8 affix headers",
 	"fullstrip":                  "FULLSTRIP",
 	"gh1044":                     "FULLSTRIP",
 	"gh1122":                     "escaped slash in a .dic entry",
@@ -88,16 +84,9 @@ func TestHunspellCorpus(t *testing.T) {
 func runHunspellFixture(t *testing.T, base string) []string {
 	t.Helper()
 
-	affBytes, err := os.ReadFile(base + ".aff")
-	if err != nil {
-		t.Fatal(err)
-	}
-	charset := hunspellCharset(affBytes)
-
-	aff := hunspellDecode(t, affBytes, charset)
-	dic := hunspellDecode(t, readFixture(t, base+".dic"), charset)
-
-	gs, err := newGoSpellReader(bytes.NewReader(aff), bytes.NewReader(dic))
+	gs, err := newGoSpellReader(
+		bytes.NewReader(readFixture(t, base+".aff")),
+		bytes.NewReader(readFixture(t, base+".dic")))
 	if err != nil {
 		return []string{"load: " + err.Error()}
 	}
@@ -125,39 +114,6 @@ func runHunspellFixture(t *testing.T, base string) []string {
 	}
 	sort.Strings(failures)
 	return failures
-}
-
-// hunspellCharset returns the encoding a .aff declares with SET; Hunspell's
-// default is ISO8859-1.
-func hunspellCharset(aff []byte) string {
-	scanner := bufio.NewScanner(bytes.NewReader(bytes.TrimPrefix(aff, []byte("\xef\xbb\xbf"))))
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) >= 2 && fields[0] == "SET" {
-			return fields[1]
-		}
-	}
-	return "ISO8859-1"
-}
-
-// hunspellDecode converts a fixture file to UTF-8, as the reader expects.
-func hunspellDecode(t *testing.T, b []byte, charset string) []byte {
-	t.Helper()
-	switch strings.ToUpper(charset) {
-	case "UTF-8", "UTF8":
-		return bytes.TrimPrefix(b, []byte("\xef\xbb\xbf"))
-	}
-	// Hunspell writes `ISO8859-1`; the registry spells it `ISO-8859-1`.
-	name := strings.Replace(strings.ToUpper(charset), "ISO8859-", "ISO-8859-", 1)
-	enc, err := ianaindex.IANA.Encoding(name)
-	if err != nil || enc == nil {
-		t.Skipf("charset %q is not available", charset)
-	}
-	out, err := enc.NewDecoder().Bytes(b)
-	if err != nil {
-		t.Skipf("charset %q: %v", charset, err)
-	}
-	return out
 }
 
 func readFixture(t *testing.T, path string) []byte {

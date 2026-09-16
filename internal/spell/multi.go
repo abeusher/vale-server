@@ -186,7 +186,11 @@ func (m *Checker) Suggest(word string) []string {
 
 // Dict returns the underlying dictionary for the provided index.
 func (m *Checker) Dict(i int) map[string]struct{} {
-	return m.checkers[i].dict
+	words := make(map[string]struct{}, len(m.checkers[i].roots))
+	for word := range m.checkers[i].roots {
+		words[word] = struct{}{}
+	}
+	return words
 }
 
 // Convert performs character substitutions (ICONV).
