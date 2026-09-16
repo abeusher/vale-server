@@ -455,9 +455,20 @@ func TestBreakRules(t *testing.T) {
 		}
 	}
 
-	none := load("SET UTF-8\n")
+	// No BREAK line means Hunspell's defaults: `-`, `^-`, and `-$`.
+	defaults := load("SET UTF-8\n")
+	for word, want := range map[string]bool{
+		"foo-bar": true, "-foo": true, "foo-": true, "foo-qux": false, "-": false,
+	} {
+		if got := defaults.spell(word); got != want {
+			t.Errorf("default BREAK: spell(%q) = %v, want %v", word, got, want)
+		}
+	}
+
+	// `BREAK 0` declares that there are none.
+	none := load("SET UTF-8\nBREAK 0\n")
 	if none.spell("foo-bar") {
-		t.Error("expected 'foo-bar' to be rejected without BREAK rules")
+		t.Error("expected 'foo-bar' to be rejected under BREAK 0")
 	}
 }
 

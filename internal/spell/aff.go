@@ -107,6 +107,12 @@ type dictConfig struct {
 	CircumfixFlag     string   // CIRCUMFIX: a prefix and suffix that go together
 	Aliases           []string // AF: flag sets that an entry names by number
 
+	BreakDeclared       bool // any BREAK line; otherwise Hunspell's defaults apply
+	CheckCompoundDup    bool // CHECKCOMPOUNDDUP: no segment twice in a row
+	CheckCompoundTriple bool // CHECKCOMPOUNDTRIPLE: no letter three times at a boundary
+	SimplifiedTriple    bool // SIMPLIFIEDTRIPLE: a triple may be written as a double
+	CheckCompoundCase   bool // CHECKCOMPOUNDCASE: no upper-case letter at a boundary
+
 	// Ignored names the directives the file used that this reader does not
 	// implement, in the order they were first seen.
 	Ignored []string
@@ -472,6 +478,14 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			if len(parts) >= 2 {
 				aff.CircumfixFlag = parts[1]
 			}
+		case "CHECKCOMPOUNDDUP":
+			aff.CheckCompoundDup = true
+		case "CHECKCOMPOUNDTRIPLE":
+			aff.CheckCompoundTriple = true
+		case "SIMPLIFIEDTRIPLE":
+			aff.SimplifiedTriple = true
+		case "CHECKCOMPOUNDCASE":
+			aff.CheckCompoundCase = true
 		case "AF":
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("AF stanza had %d fields, expected 2", len(parts))
@@ -509,6 +523,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 			}
 			// The first BREAK line is a count, which only preallocates; the
 			// rest are patterns. See #1165.
+			aff.BreakDeclared = true
 			if !sawBreakCount && allDigits(parts[1]) {
 				sawBreakCount = true
 				continue

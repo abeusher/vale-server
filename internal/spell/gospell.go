@@ -23,11 +23,18 @@ type goSpell struct {
 	dict  map[string]struct{}
 	exact map[string]struct{} // KEEPCASE words, matched as written
 
+	// forbidden holds FORBIDDENWORD forms, which no other path may accept.
+	forbidden map[string]struct{}
+
 	ireplacer   *strings.Replacer
 	compounds   []*regexp.Regexp
 	splitter    *splitter
 	canCompound bool // dictionary uses COMPOUNDFLAG/BEGIN/MIDDLE/END
 	compoundMin int
+	checkDup    bool // CHECKCOMPOUNDDUP
+	checkTriple bool // CHECKCOMPOUNDTRIPLE
+	simplified  bool // SIMPLIFIEDTRIPLE
+	checkCase   bool // CHECKCOMPOUNDCASE
 	breaks      []breakRule
 	ignored     []string // .aff directives the reader does not implement
 }
@@ -42,6 +49,9 @@ type breakRule struct {
 
 // maxBreakDepth bounds how many times a word may be split by BREAK rules.
 const maxBreakDepth = 10
+
+// defaultBreaks is what Hunspell uses when a dictionary declares no BREAK.
+var defaultBreaks = []string{"-", "^-", "-$"}
 
 func newBreakRules(patterns []string) []breakRule {
 	rules := make([]breakRule, 0, len(patterns))
@@ -204,6 +214,9 @@ func (s *goSpell) spell(word string) bool {
 
 // spellDepth is spell with a count of how many BREAK splits led here.
 func (s *goSpell) spellDepth(word string, depth int) bool {
+	if _, ok := s.forbidden[word]; ok {
+		return false
+	}
 	if _, ok := s.exact[word]; ok {
 		return true
 	}
@@ -334,12 +347,13 @@ func (s *goSpell) isCompound(word string) bool {
 	// Bound the work: very long inputs are unlikely to be real words and the
 	// recursion is super-linear.
 	if r := []rune(word); len(r) <= 100 {
-		return s.compoundParts(r, 0)
+		return s.compoundParts(r, "", 0)
 	}
 	return false
 }
 
-func (s *goSpell) compoundParts(runes []rune, depth int) bool {
+// compoundParts reports whether runes split into dictionary segments.
+func (s *goSpell) compoundParts(runes []rune, _ string, depth int) bool {
 	if depth > 4 { // cap the number of segments
 		return false
 	}
@@ -354,12 +368,51 @@ func (s *goSpell) compoundParts(runes []rune, depth int) bool {
 	}
 	n := len(runes)
 	for i := minLen; i <= n-minLen; i++ {
-		if s.inDict(string(runes[:i])) &&
-			(s.inDict(string(runes[i:])) || s.compoundParts(runes[i:], depth+1)) {
-			return true
+		if !s.boundaryOK(runes, i) {
+			continue
+		}
+		left, rest := string(runes[:i]), runes[i:]
+
+		// With SIMPLIFIEDTRIPLE, `glassko` is glass+sko: the letter the two
+		// share is written once.
+		candidates := []string{left}
+		if s.simplified && runes[i-1] == runes[i] {
+			candidates = append(candidates, left+string(runes[i]))
+		}
+
+		for _, seg := range candidates {
+			if !s.inDict(seg) {
+				continue
+			}
+			// Hunspell forbids a duplicate only at the end: foofoobar is
+			// fine, foobarbar is not.
+			last := string(rest)
+			if s.inDict(last) && !(s.checkDup && last == seg) {
+				return true
+			}
+			if s.compoundParts(rest, seg, depth+1) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// boundaryOK applies the checks a dictionary asks for at a compound boundary
+// before runes[i], as the word is written.
+func (s *goSpell) boundaryOK(runes []rune, i int) bool {
+	before, after := runes[i-1], runes[i]
+	if s.checkTriple {
+		if (i >= 2 && runes[i-2] == before && before == after) ||
+			(i+1 < len(runes) && before == after && after == runes[i+1]) {
+			return false
+		}
+	}
+	if s.checkCase && before != '-' && after != '-' &&
+		(unicode.IsUpper(before) || unicode.IsUpper(after)) {
+		return false
+	}
+	return true
 }
 
 // capitalize upper-cases the first rune of s, leaving the rest unchanged.
@@ -394,12 +447,21 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		splitter:    newSplitter(affix.WordChars),
 		canCompound: affix.compoundingEnabled(),
 		compoundMin: affix.CompoundMin,
+		checkDup:    affix.CheckCompoundDup,
+		checkTriple: affix.CheckCompoundTriple,
+		simplified:  affix.SimplifiedTriple,
+		checkCase:   affix.CheckCompoundCase,
 		breaks:      newBreakRules(affix.Break),
 		ignored:     affix.Ignored,
+		forbidden:   make(map[string]struct{}),
+	}
+	if !affix.BreakDeclared {
+		gs.breaks = newBreakRules(defaultBreaks)
 	}
 
 	words := []string{}
 	forbidden := []string{}
+	stems := map[string]struct{}{} // of the entries read so far that are not forbidden
 	for scanner.Scan() {
 		line := scanner.Text()
 		// A .dic entry is `word/flags` optionally followed by whitespace-
@@ -433,7 +495,14 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 
 		switch {
 		case affix.entryHas(line, affix.ForbiddenFlag):
-			forbidden = append(forbidden, words...)
+			// Hunspell reads homonyms in order and the first decides, so
+			// an earlier entry keeps its stem valid.
+			for _, word := range words {
+				if _, seen := stems[word]; !seen {
+					forbidden = append(forbidden, word)
+				}
+			}
+			continue
 		case affix.entryHas(line, affix.KeepCaseFlag):
 			for _, word := range words {
 				gs.exact[word] = struct{}{}
@@ -443,6 +512,8 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 				gs.dict[word] = struct{}{}
 			}
 		}
+		stem, _, _ := strings.Cut(line, "/")
+		stems[stem] = struct{}{}
 	}
 
 	if err = scanner.Err(); err != nil {
@@ -453,6 +524,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	for _, word := range forbidden {
 		delete(gs.dict, word)
 		delete(gs.exact, word)
+		gs.forbidden[word] = struct{}{}
 	}
 
 	for _, compoundRule := range affix.CompoundRule {
