@@ -65,6 +65,10 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 	// the source had it before `walk` trimmed it: what separated that text
 	// from an inline element opening after it.
 	var trailing string
+	// padComment is that whitespace when a comment followed the text: the
+	// comment is masked out, so the next text is separated as the source
+	// separated the comment.
+	var padComment string
 
 	buf := bytes.NewBufferString("")
 
@@ -156,6 +160,7 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 			// `infor` (#1052).
 			skip = core.StringInSlice(txt, skipped) || core.StringInSlice(txt, skipTags)
 			closedInline = false
+			padComment = ""
 			if scope, ok := wanted[txt]; ok {
 				// A skipped element's text is masked out of the block, so its
 				// capture has to read the text as it arrived instead.
@@ -165,6 +170,7 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 		} else if tokt == html.EndTagToken && core.StringInSlice(txt, inlineTags) {
 			walker.activeTag = ""
 			closedInline = true
+			padComment = ""
 			if n := len(open); n > 0 && open[n-1].tag == txt {
 				done := open[n-1]
 				open = open[:n-1]
@@ -187,6 +193,7 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 			// so leave the state alone and keep its padding (#1052).
 			if !inline {
 				closedInline = true
+				padComment = trailing
 			}
 			// Found before `update` masks it out of the context.
 			f.UpdateCommentsAt(txt, walker.commentAt(txt))
@@ -225,6 +232,10 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 				// (#1119). A line break stays a line break, as it does in
 				// plain text, so `[x](u)\n,` isn't read as `x ,` (#1174).
 				sep := leadingSpace(tok.Data)
+				if closedInline && sep == "" {
+					sep = padComment
+				}
+				padComment = ""
 				// Kept before `clean`, which empties the text of a skipped
 				// element: inline code never reaches the block, so a capture of
 				// it has nothing else to read.

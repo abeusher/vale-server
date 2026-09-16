@@ -106,3 +106,31 @@ cases:
     exit: 1
     want: |
       issue882.md:4:3:Vale.Spelling:Did you really mean 'sona'?
+
+  - name: inline-comment-keeps-space
+    about: "A comment is masked out of its paragraph. The whitespace the
+      source put before it still separates the words on either side, so
+      `firstt, <!-- c -->then` reads as `firstt, then`, not `firstt,then`."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        Prose firstt, <!-- note -->then a commentt mid-line.
+
+        Prose secondd <!-- note --> then a commentt.
+
+        Prose thirdd <!-- note -->then.
+
+        Prose fourthh<!-- note --> then.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:7:Vale.Spelling:Did you really mean 'firstt'?
+      test.md:1:35:Vale.Spelling:Did you really mean 'commentt'?
+      test.md:3:7:Vale.Spelling:Did you really mean 'secondd'?
+      test.md:3:36:Vale.Spelling:Did you really mean 'commentt'?
+      test.md:5:7:Vale.Spelling:Did you really mean 'thirdd'?
+      test.md:7:7:Vale.Spelling:Did you really mean 'fourthh'?
