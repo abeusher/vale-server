@@ -101,6 +101,15 @@ type dictConfig struct {
 	CompoundMin       int
 	compoundMap       map[string][]string
 	NoSuggestFlag     string
+	ForbiddenFlag     string   // FORBIDDENWORD: the entry's forms are not words
+	NeedAffixFlag     string   // NEEDAFFIX: the bare stem is not a word
+	KeepCaseFlag      string   // KEEPCASE: accepted only as written
+	CircumfixFlag     string   // CIRCUMFIX: a prefix and suffix that go together
+	Aliases           []string // AF: flag sets that an entry names by number
+
+	// Ignored names the directives the file used that this reader does not
+	// implement, in the order they were first seen.
+	Ignored []string
 }
 
 // compoundingEnabled reports whether the dictionary uses affix-flag-based
@@ -119,6 +128,14 @@ func (a *dictConfig) compoundingEnabled() bool {
 //   - "UTF-8": each UTF-8 character is a flag
 //   - "long": each pair of ASCII characters is a flag
 func (a dictConfig) parseFlags(flagStr string) []string {
+	// With AF, an entry's flags are the number of an alias line.
+	if len(a.Aliases) > 0 && allDigits(flagStr) {
+		n, err := strconv.Atoi(flagStr)
+		if err != nil || n < 1 || n > len(a.Aliases) {
+			return nil
+		}
+		flagStr = a.Aliases[n-1]
+	}
 	switch a.Flag {
 	case "num":
 		return strings.Split(flagStr, ",")
@@ -182,7 +199,9 @@ func (a dictConfig) expandDepth(wordAffix string, out []string, depth int) ([]st
 		return out, nil
 	}
 
-	out = append(out, word)
+	if !hasFlag(flags, a.NeedAffixFlag) {
+		out = append(out, word)
+	}
 	prefixes := make([]affix, 0, 5)
 	suffixes := make([]affix, 0, 5)
 	for _, key := range flags {
@@ -191,7 +210,7 @@ func (a dictConfig) expandDepth(wordAffix string, out []string, depth int) ([]st
 			continue
 		}
 		if !af.CrossProduct {
-			out = a.appendForms(af.forms(word), out, depth)
+			out = a.appendForms(a.alone(af.forms(word)), out, depth)
 			continue
 		}
 		if af.Type == Prefix {
@@ -203,20 +222,55 @@ func (a dictConfig) expandDepth(wordAffix string, out []string, depth int) ([]st
 
 	// expand all suffixes with out any prefixes
 	for _, suf := range suffixes {
-		out = a.appendForms(suf.forms(word), out, depth)
+		out = a.appendForms(a.alone(suf.forms(word)), out, depth)
 	}
 	for _, pre := range prefixes {
 		prewords := pre.forms(word)
-		out = a.appendForms(prewords, out, depth)
+		out = a.appendForms(a.alone(prewords), out, depth)
 
 		// now do cross product
 		for _, suf := range suffixes {
 			for _, w := range prewords {
-				out = a.appendForms(suf.forms(w.Word), out, depth)
+				out = a.appendForms(a.paired(w, suf.forms(w.Word)), out, depth)
 			}
 		}
 	}
 	return out, nil
+}
+
+// circumfix reports whether a form's rule carries the CIRCUMFIX flag.
+func (a dictConfig) circumfix(f form) bool {
+	return f.Cont != "" && hasFlag(a.parseFlags(f.Cont), a.CircumfixFlag)
+}
+
+// alone drops the forms that need a partner, when the affix is used by itself.
+func (a dictConfig) alone(forms []form) []form {
+	if a.CircumfixFlag == "" {
+		return forms
+	}
+	kept := make([]form, 0, len(forms))
+	for _, f := range forms {
+		if !a.circumfix(f) {
+			kept = append(kept, f)
+		}
+	}
+	return kept
+}
+
+// paired keeps the suffixed forms of a prefixed word whose two halves agree
+// on CIRCUMFIX: both carry it, or neither does.
+func (a dictConfig) paired(pre form, forms []form) []form {
+	if a.CircumfixFlag == "" {
+		return forms
+	}
+	want := a.circumfix(pre)
+	kept := make([]form, 0, len(forms))
+	for _, f := range forms {
+		if a.circumfix(f) == want {
+			kept = append(kept, f)
+		}
+	}
+	return kept
 }
 
 // maxAffixDepth bounds how many times a continuation class may be followed.
@@ -237,8 +291,14 @@ const maxAffixDepth = 2
 // visibly in Danish, Dutch and Hungarian, where inflection is built this way.
 func (a dictConfig) appendForms(forms []form, out []string, depth int) []string {
 	for _, f := range forms {
-		out = append(out, f.Word)
-		if f.Cont == "" || depth >= maxAffixDepth {
+		if f.Cont == "" {
+			out = append(out, f.Word)
+			continue
+		}
+		if !hasFlag(a.parseFlags(f.Cont), a.NeedAffixFlag) {
+			out = append(out, f.Word)
+		}
+		if depth >= maxAffixDepth {
 			continue
 		}
 		// The continuation is expressed exactly like a dictionary entry, so
@@ -260,6 +320,29 @@ func (a dictConfig) appendForms(forms []form, out []string, depth int) []string 
 // allDigits reports whether s is non-empty and contains only ASCII digits. It
 // distinguishes a PFX/SFX header's count field from a rule's affix text when
 // both lines have four fields. See #776.
+// hasFlag reports whether flag is set and among flags.
+func hasFlag(flags []string, flag string) bool {
+	return flag != "" && stringIn(flag, flags)
+}
+
+// entryHas reports whether a `.dic` entry carries flag.
+func (a dictConfig) entryHas(entry, flag string) bool {
+	if flag == "" {
+		return false
+	}
+	_, flags, found := strings.Cut(entry, "/")
+	return found && hasFlag(a.parseFlags(flags), flag)
+}
+
+func stringIn(s string, list []string) bool {
+	for _, item := range list {
+		if item == s {
+			return true
+		}
+	}
+	return false
+}
+
 func allDigits(s string) bool {
 	if s == "" {
 		return false
@@ -291,6 +374,7 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 		CompoundMin: defaultCompoundMin,
 	}
 	sawBreakCount := false
+	sawAliasCount := false
 
 	scanner := bufio.NewScanner(file)
 	for scanner.Scan() {
@@ -372,6 +456,32 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				return nil, fmt.Errorf("NOSUGGEST stanza had %d fields, expected 2", len(parts))
 			}
 			aff.NoSuggestFlag = parts[1]
+		case "FORBIDDENWORD":
+			if len(parts) >= 2 {
+				aff.ForbiddenFlag = parts[1]
+			}
+		case "NEEDAFFIX", "PSEUDOROOT":
+			if len(parts) >= 2 {
+				aff.NeedAffixFlag = parts[1]
+			}
+		case "KEEPCASE":
+			if len(parts) >= 2 {
+				aff.KeepCaseFlag = parts[1]
+			}
+		case "CIRCUMFIX":
+			if len(parts) >= 2 {
+				aff.CircumfixFlag = parts[1]
+			}
+		case "AF":
+			if len(parts) < 2 {
+				return nil, fmt.Errorf("AF stanza had %d fields, expected 2", len(parts))
+			}
+			// The first AF line is a count, which only preallocates.
+			if !sawAliasCount && allDigits(parts[1]) {
+				sawAliasCount = true
+				continue
+			}
+			aff.Aliases = append(aff.Aliases, parts[1])
 		case "COMPOUNDFLAG":
 			if len(parts) >= 2 {
 				aff.CompoundFlag = parts[1]
@@ -499,9 +609,12 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				aff.AffixMap[flag] = a
 			}
 		default:
-			// Do nothing.
-			//
-			// Hunspell ignores lines that don't start with a known directive.
+			// Hunspell ignores lines that don't start with a directive; a
+			// directive it knows and this reader does not is recorded.
+			name := parts[0]
+			if !strings.HasPrefix(name, "#") && !stringIn(name, aff.Ignored) {
+				aff.Ignored = append(aff.Ignored, name)
+			}
 		}
 	}
 

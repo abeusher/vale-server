@@ -20,7 +20,8 @@ type wordMatch struct {
 }
 
 type goSpell struct {
-	dict map[string]struct{}
+	dict  map[string]struct{}
+	exact map[string]struct{} // KEEPCASE words, matched as written
 
 	ireplacer   *strings.Replacer
 	compounds   []*regexp.Regexp
@@ -28,6 +29,7 @@ type goSpell struct {
 	canCompound bool // dictionary uses COMPOUNDFLAG/BEGIN/MIDDLE/END
 	compoundMin int
 	breaks      []breakRule
+	ignored     []string // .aff directives the reader does not implement
 }
 
 // breakRule is one Hunspell BREAK pattern: a literal that a word may be
@@ -139,9 +141,12 @@ func (s *goSpell) keys() []string {
 func (s *goSpell) suggest(word string) []wordMatch {
 	metric := metrics.NewLevenshtein()
 
+	// Distance is measured case-insensitively; the case comes back below.
+	lower := strings.ToLower(word)
+
 	matches := []wordMatch{}
 	for _, option := range s.keys() {
-		sim := strutil.Similarity(option, word, metric)
+		sim := strutil.Similarity(option, lower, metric)
 		matches = append(matches, wordMatch{option, sim})
 	}
 
@@ -149,15 +154,47 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		return matches[i].score > matches[j].score
 	})
 
-	hits := matches[:5]
-	if word == strings.Title(word) { //nolint:staticcheck
-		// Capitalized word, so capitalize the suggestions
+	hits := matches
+	if len(hits) > 5 {
+		hits = hits[:5]
+	}
+
+	// Suggestions take the case the word was written in.
+	switch {
+	case allUpper(word):
 		for i := range hits {
-			hits[i].word = strings.Title(hits[i].word) //nolint:staticcheck
+			hits[i].word = strings.ToUpper(hits[i].word)
+		}
+	case initialUpper(word):
+		for i := range hits {
+			hits[i].word = capitalize(hits[i].word)
 		}
 	}
 
 	return hits
+}
+
+// allUpper reports whether word has letters and every one is upper-case.
+func allUpper(word string) bool {
+	letters := false
+	for _, r := range word {
+		if !unicode.IsLetter(r) {
+			continue
+		}
+		if !unicode.IsUpper(r) {
+			return false
+		}
+		letters = true
+	}
+	return letters
+}
+
+// initialUpper reports whether word starts with an upper-case letter.
+func initialUpper(word string) bool {
+	for _, r := range word {
+		return unicode.IsUpper(r)
+	}
+	return false
 }
 
 // spell checks to see if a given word is in the internal dictionaries
@@ -167,13 +204,22 @@ func (s *goSpell) spell(word string) bool {
 
 // spellDepth is spell with a count of how many BREAK splits led here.
 func (s *goSpell) spellDepth(word string, depth int) bool {
+	if _, ok := s.exact[word]; ok {
+		return true
+	}
 	_, ok := s.dict[word]
 	if ok {
 		return true
 	}
-	_, ok = s.dict[strings.ToLower(word)]
-	if ok {
+	lower := strings.ToLower(word)
+	if _, ok = s.dict[lower]; ok {
 		return true
+	}
+	// An upper-cased word matches a capitalized entry: PARIS for Paris.
+	if allUpper(word) {
+		if _, ok = s.dict[capitalize(lower)]; ok {
+			return true
+		}
 	}
 
 	if isNumber(word) {
@@ -343,14 +389,17 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	gs := goSpell{
 		// TODO: Use fixed size from first list?
 		dict:        make(map[string]struct{}),
+		exact:       make(map[string]struct{}),
 		compounds:   make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
 		splitter:    newSplitter(affix.WordChars),
 		canCompound: affix.compoundingEnabled(),
 		compoundMin: affix.CompoundMin,
 		breaks:      newBreakRules(affix.Break),
+		ignored:     affix.Ignored,
 	}
 
 	words := []string{}
+	forbidden := []string{}
 	for scanner.Scan() {
 		line := scanner.Text()
 		// A .dic entry is `word/flags` optionally followed by whitespace-
@@ -382,13 +431,28 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 			continue
 		}
 
-		for _, word := range words {
-			gs.dict[word] = struct{}{}
+		switch {
+		case affix.entryHas(line, affix.ForbiddenFlag):
+			forbidden = append(forbidden, words...)
+		case affix.entryHas(line, affix.KeepCaseFlag):
+			for _, word := range words {
+				gs.exact[word] = struct{}{}
+			}
+		default:
+			for _, word := range words {
+				gs.dict[word] = struct{}{}
+			}
 		}
 	}
 
 	if err = scanner.Err(); err != nil {
 		return nil, err
+	}
+
+	// A forbidden word overrides any entry that generates it.
+	for _, word := range forbidden {
+		delete(gs.dict, word)
+		delete(gs.exact, word)
 	}
 
 	for _, compoundRule := range affix.CompoundRule {

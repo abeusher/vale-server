@@ -1,6 +1,7 @@
 package spell
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -479,5 +480,30 @@ func TestBreakRulesParse(t *testing.T) {
 	}
 	if _, err := newDictConfig(strings.NewReader("BREAK")); err == nil {
 		t.Error("expected a bare BREAK line to be rejected")
+	}
+}
+
+// A directive the reader does not implement is recorded once, so a caller
+// can tell a dictionary that loaded from one that loaded faithfully.
+func TestUnsupportedDirectivesAreRecorded(t *testing.T) {
+	affContent := `# a comment line
+SET UTF-8
+CHECKSHARPS
+MAP 2
+MAP uü
+CHECKSHARPS
+TRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ'
+
+SFX A Y 1
+SFX A 0 s .
+`
+	aff, err := newDictConfig(strings.NewReader(affContent))
+	if err != nil {
+		t.Fatalf("newDictConfig error: %v", err)
+	}
+
+	want := []string{"SET", "CHECKSHARPS", "MAP"}
+	if !reflect.DeepEqual(aff.Ignored, want) {
+		t.Errorf("Ignored = %v, want %v", aff.Ignored, want)
 	}
 }

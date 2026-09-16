@@ -3,6 +3,7 @@ package spell
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -53,5 +54,20 @@ func TestReadAssetFindsSymlinkedAsset(t *testing.T) {
 	}
 	if got != link {
 		t.Errorf("readAsset = %q, want %q", got, link)
+	}
+}
+
+// The bundled dictionary uses one directive the reader ignores: its encoding.
+// A new directive appearing here means the reader has fallen behind the
+// dictionary it ships with.
+func TestDefaultDictionaryIgnoredDirectives(t *testing.T) {
+	checker, err := NewChecker()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := []string{"SET"}
+	if got := checker.Ignored(); !reflect.DeepEqual(got, want) {
+		t.Errorf("Ignored() = %v, want %v", got, want)
 	}
 }

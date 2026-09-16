@@ -135,6 +135,23 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 	return &checker, nil
 }
 
+// Ignored names the `.aff` directives the loaded dictionaries use that the
+// checker does not implement, sorted.
+func (m *Checker) Ignored() []string {
+	seen := map[string]struct{}{}
+	var names []string
+	for _, checker := range m.checkers {
+		for _, name := range checker.ignored {
+			if _, ok := seen[name]; !ok {
+				seen[name] = struct{}{}
+				names = append(names, name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
 // Spell checks to see if a given word is in the internal dictionaries.
 func (m *Checker) Spell(word string) bool {
 	for _, checker := range m.checkers {
