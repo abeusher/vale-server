@@ -26,6 +26,12 @@ type goSpell struct {
 	// forbidden holds FORBIDDENWORD forms, which no other path may accept.
 	forbidden map[string]struct{}
 
+	// segments holds the words a compound may be built from, and where.
+	segments map[string]segment
+	// pairs holds the run-together form of each two-word entry, which is
+	// not a compound.
+	pairs map[string]struct{}
+
 	ireplacer   *strings.Replacer
 	compounds   []*regexp.Regexp
 	splitter    *splitter
@@ -318,54 +324,52 @@ func (s *goSpell) breakParts(word string, depth int) bool {
 	return false
 }
 
-// inDict reports whether word is a dictionary entry, trying its exact,
-// lower-cased, and title-cased forms. The latter two matter for compound
-// segments: e.g. a German compound writes interior nouns lower-case, while the
-// dictionary stores them capitalized.
-func (s *goSpell) inDict(word string) bool {
-	if _, ok := s.dict[word]; ok {
-		return true
+// segment returns what a compound may use word as, trying its exact,
+// lower-cased, and capitalized forms: a German compound writes interior
+// nouns lower-case, while the dictionary stores them capitalized.
+func (s *goSpell) segment(word string) (segment, bool) {
+	if seg, ok := s.segments[word]; ok {
+		return seg, true
 	}
-	if _, ok := s.dict[strings.ToLower(word)]; ok {
-		return true
+	if seg, ok := s.segments[strings.ToLower(word)]; ok {
+		return seg, true
 	}
-	if _, ok := s.dict[capitalize(word)]; ok {
-		return true
-	}
-	return false
+	seg, ok := s.segments[capitalize(word)]
+	return seg, ok
 }
 
-// isCompound reports whether word can be segmented into dictionary words, for
-// dictionaries that enable affix-flag compounding. This is an approximation of
-// Hunspell's COMPOUNDFLAG/BEGIN/MIDDLE/END handling: it doesn't verify each
-// segment's position flags, but recognizing legitimate compounds (rather than
-// flagging them) is the priority. See #848.
+// isCompound reports whether word is built from segments the dictionary's
+// compound flags allow, for dictionaries that enable flag compounding.
 func (s *goSpell) isCompound(word string) bool {
 	if !s.canCompound {
+		return false
+	}
+	if _, ok := s.pairs[word]; ok {
 		return false
 	}
 	// Bound the work: very long inputs are unlikely to be real words and the
 	// recursion is super-linear.
 	if r := []rune(word); len(r) <= 100 {
-		return s.compoundParts(r, "", 0)
+		return s.compoundParts(r, word, 0)
 	}
 	return false
 }
 
-// compoundParts reports whether runes split into dictionary segments.
-func (s *goSpell) compoundParts(runes []rune, _ string, depth int) bool {
+// compoundParts reports whether runes split into segments allowed at their
+// positions; word is the whole word, for FORCEUCASE.
+func (s *goSpell) compoundParts(runes []rune, word string, depth int) bool {
 	if depth > 4 { // cap the number of segments
 		return false
 	}
 	// Enforce a sane minimum segment length. Some dictionaries set
-	// COMPOUNDMIN very low (OpenTaal's Dutch uses 0) and rely on per-segment
-	// position flags -- which this approximation doesn't check -- to constrain
-	// compounds. Without a floor, every short letter string would split into
-	// 1-2 char dictionary entries and be wrongly accepted. See #776.
+	// COMPOUNDMIN very low (OpenTaal's Dutch uses 0). Without a floor, every
+	// short letter string would split into 1-2 char dictionary entries and
+	// be wrongly accepted. See #776.
 	minLen := s.compoundMin
 	if minLen < 3 {
 		minLen = 3
 	}
+	first := depth == 0
 	n := len(runes)
 	for i := minLen; i <= n-minLen; i++ {
 		if !s.boundaryOK(runes, i) {
@@ -381,16 +385,18 @@ func (s *goSpell) compoundParts(runes []rune, _ string, depth int) bool {
 		}
 
 		for _, seg := range candidates {
-			if !s.inDict(seg) {
+			use, ok := s.segment(seg)
+			if !ok || (first && !use.begin) || (!first && !use.middle) {
 				continue
 			}
 			// Hunspell forbids a duplicate only at the end: foofoobar is
 			// fine, foobarbar is not.
 			last := string(rest)
-			if s.inDict(last) && !(s.checkDup && last == seg) {
+			if end, isEnd := s.segment(last); isEnd && end.end &&
+				!(s.checkDup && last == seg) && (!end.upper || initialUpper(word)) {
 				return true
 			}
-			if s.compoundParts(rest, seg, depth+1) {
+			if s.compoundParts(rest, word, depth+1) {
 				return true
 			}
 		}
@@ -413,6 +419,12 @@ func (s *goSpell) boundaryOK(runes []rune, i int) bool {
 		return false
 	}
 	return true
+}
+
+// isMorphField reports whether a `.dic` field is morphology, `po:noun`.
+func isMorphField(field string) bool {
+	return len(field) > 2 && field[2] == ':' &&
+		unicode.IsLetter(rune(field[0])) && unicode.IsLetter(rune(field[1]))
 }
 
 // capitalize upper-cases the first rune of s, leaving the rest unchanged.
@@ -454,12 +466,13 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		breaks:      newBreakRules(affix.Break),
 		ignored:     affix.Ignored,
 		forbidden:   make(map[string]struct{}),
+		segments:    make(map[string]segment),
+		pairs:       make(map[string]struct{}),
 	}
 	if !affix.BreakDeclared {
 		gs.breaks = newBreakRules(defaultBreaks)
 	}
 
-	words := []string{}
 	forbidden := []string{}
 	stems := map[string]struct{}{} // of the entries read so far that are not forbidden
 	for scanner.Scan() {
@@ -475,21 +488,31 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		//
 		// Both tab- and space-separated morphology occur in the wild -- the
 		// Danish dictionary from stavekontrolden.dk uses spaces. See #1065.
+		// The word ends at the first tab; morphology follows it.
+		line, _, _ = strings.Cut(line, "\t")
 		fields := strings.Fields(line)
 		if len(fields) == 0 {
 			continue
 		}
 		line = fields[0]
 
-		words, err = affix.expand(line, words)
-		if err != nil {
+		// A space inside the word makes a pair, `compound word`, whose
+		// run-together form is not a compound.
+		if len(fields) > 1 && !isMorphField(fields[1]) {
+			gs.pairs[fields[0]+fields[1]] = struct{}{}
+			gs.dict[fields[0]+" "+fields[1]] = struct{}{}
+			continue
+		}
+
+		forms, expandErr := affix.expandEntry(line)
+		if expandErr != nil {
 			// Skip malformed entries (e.g., a line with flags but no word)
 			// rather than abandoning the entire dictionary, which would leave
 			// every word unrecognized and flagged. See #1065.
 			continue
 		}
 
-		if len(words) == 0 {
+		if len(forms) == 0 {
 			continue
 		}
 
@@ -497,19 +520,24 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		case affix.entryHas(line, affix.ForbiddenFlag):
 			// Hunspell reads homonyms in order and the first decides, so
 			// an earlier entry keeps its stem valid.
-			for _, word := range words {
-				if _, seen := stems[word]; !seen {
-					forbidden = append(forbidden, word)
+			for _, f := range forms {
+				if _, seen := stems[f.Word]; !seen {
+					forbidden = append(forbidden, f.Word)
 				}
 			}
 			continue
 		case affix.entryHas(line, affix.KeepCaseFlag):
-			for _, word := range words {
-				gs.exact[word] = struct{}{}
+			for _, f := range forms {
+				gs.exact[f.Word] = struct{}{}
 			}
 		default:
-			for _, word := range words {
-				gs.dict[word] = struct{}{}
+			for _, f := range forms {
+				if !hasFlag(f.Flags, affix.CompoundOnly) {
+					gs.dict[f.Word] = struct{}{}
+				}
+				if seg, ok := affix.compoundUse(f); ok {
+					gs.segments[f.Word] = seg
+				}
 			}
 		}
 		stem, _, _ := strings.Cut(line, "/")
@@ -524,6 +552,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	for _, word := range forbidden {
 		delete(gs.dict, word)
 		delete(gs.exact, word)
+		delete(gs.segments, word)
 		gs.forbidden[word] = struct{}{}
 	}
 

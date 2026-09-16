@@ -274,9 +274,9 @@ test/AB
 
 func TestCompoundSegmentation(t *testing.T) {
 	// A dictionary that enables affix-flag compounding should accept words
-	// that split into dictionary segments (e.g. German "Funktionswert"). See
-	// #848.
-	dic := "2\nfoo\nbar\n"
+	// that split into flagged dictionary segments (e.g. German
+	// "Funktionswert"). See #848.
+	dic := "3\nfoo/A\nbar/A\nbaz\n"
 
 	withFlags := "SET UTF-8\nCOMPOUNDFLAG A\nCOMPOUNDMIN 2\n"
 	gs, err := newGoSpellReader(strings.NewReader(withFlags), strings.NewReader(dic))
@@ -288,6 +288,9 @@ func TestCompoundSegmentation(t *testing.T) {
 	}
 	if gs.spell("fooqux") {
 		t.Error("expected 'fooqux' (qux not a word) to be rejected")
+	}
+	if gs.spell("foobaz") {
+		t.Error("expected 'foobaz' (baz has no compound flag) to be rejected")
 	}
 
 	// Without compound flags, no segmentation happens (English behavior).
