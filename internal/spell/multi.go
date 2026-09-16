@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/vale-cli/vale/v3/internal/system"
 )
@@ -96,7 +97,9 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 	}
 
 	for _, entry := range base.dics {
-		c, err := newGoSpell(entry.aff, entry.dic)
+		c, err := sharedDictionary(entry.aff+"\x00"+entry.dic, func() (*goSpell, error) {
+			return newGoSpell(entry.aff, entry.dic)
+		})
 		if err != nil {
 			return &checker, err
 		}
@@ -105,10 +108,9 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 
 	if len(checker.checkers) == 0 || base.load {
 		// use default dictionary ...
-		aff := bytes.NewReader(defaultAff)
-		dic := bytes.NewReader(defaultDic)
-
-		c, err := newGoSpellReader(aff, dic)
+		c, err := sharedDictionary("embedded\x00en_US-web", func() (*goSpell, error) {
+			return newGoSpellReader(bytes.NewReader(defaultAff), bytes.NewReader(defaultDic))
+		})
 		if err != nil {
 			return &checker, err
 		}
@@ -150,6 +152,24 @@ func (m *Checker) Ignored() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// dictionaries holds each loaded dictionary by its source, so that every
+// spelling rule that names the same files shares one copy.
+var dictionaries sync.Map // key -> *goSpell, pristine
+
+// sharedDictionary returns a checker over the dictionary key names, loading
+// it once.
+func sharedDictionary(key string, load func() (*goSpell, error)) (*goSpell, error) {
+	if pristine, ok := dictionaries.Load(key); ok {
+		return pristine.(*goSpell).fork(), nil //nolint:errcheck // only *goSpell is stored
+	}
+	pristine, err := load()
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := dictionaries.LoadOrStore(key, pristine)
+	return actual.(*goSpell).fork(), nil //nolint:errcheck // only *goSpell is stored
 }
 
 // Spell checks to see if a given word is in the internal dictionaries.
@@ -262,7 +282,9 @@ func (m *Checker) loadDic(name string) error {
 		return err
 	}
 
-	s, err := newGoSpellReader(aff, dic)
+	s, err := sharedDictionary(affPath+"\x00"+dicPath, func() (*goSpell, error) {
+		return newGoSpellReader(aff, dic)
+	})
 	if err != nil {
 		return err
 	}

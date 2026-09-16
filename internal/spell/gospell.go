@@ -22,7 +22,26 @@ type wordMatch struct {
 	score float64
 }
 
+// goSpell checks words against one dictionary. The dictionary is shared by
+// every checker that loads the same files; the ignore-list words and the
+// lookup caches are a checker's own.
 type goSpell struct {
+	*dictData
+
+	// listed holds the words an ignore list added. They match as written
+	// or lower-cased, whatever the input's case, as they always have.
+	listed map[string]struct{}
+
+	// Lookups are memoized, since a document repeats its words and a
+	// checker is shared by the files linted in parallel.
+	mu       sync.Mutex
+	spelled  map[string]bool
+	segments map[string]segmentUse
+}
+
+// dictData is what a `.aff` and `.dic` pair loads to. It is never written
+// after loading, so checkers share it.
+type dictData struct {
 	affix *dictConfig
 
 	// roots holds the `.dic` entries by word, one per homonym line. Their
@@ -32,20 +51,9 @@ type goSpell struct {
 	// upperRoots maps the upper-cased form of each root with a capital to
 	// the roots it stands for, Hunspell's hidden upper-case homonym.
 	upperRoots map[string][]string
-
-	// listed holds the words an ignore list added. They match as written
-	// or lower-cased, whatever the input's case, as they always have.
-	listed map[string]struct{}
-
 	// forbiddenRoots holds the FORBIDDENWORD entries; their forms are not
 	// words, and no other reading of one may accept it.
 	forbiddenRoots map[string][]rootEntry
-
-	// Lookups are memoized, since a document repeats its words and a
-	// checker is shared by the files linted in parallel.
-	mu       sync.Mutex
-	spelled  map[string]bool
-	segments map[string]segmentUse
 	// pairs holds the run-together form of each two-word entry, which is
 	// not a compound.
 	pairs map[string]struct{}
@@ -67,6 +75,17 @@ type goSpell struct {
 	patterns    []compoundPattern
 	breaks      []breakRule
 	ignored     []string // .aff directives the reader does not implement
+}
+
+// fork returns a checker over the same dictionary with its own ignore list
+// and caches.
+func (s *goSpell) fork() *goSpell {
+	return &goSpell{
+		dictData: s.dictData,
+		listed:   make(map[string]struct{}),
+		spelled:  make(map[string]bool),
+		segments: make(map[string]segmentUse),
+	}
 }
 
 // rootEntry is one `.dic` line's flags.
@@ -137,7 +156,6 @@ func (s *goSpell) addWordRaw(word string) bool {
 		// already exists
 		return false
 	}
-	s.roots[word] = append(s.roots[word], rootEntry{})
 	s.listed[word] = struct{}{}
 	s.mu.Lock()
 	s.spelled = make(map[string]bool)
@@ -247,7 +265,10 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		roots = append(roots, wordMatch{option, sim})
 	}
 	sort.Slice(roots, func(i, j int) bool {
-		return roots[i].score > roots[j].score
+		if roots[i].score != roots[j].score {
+			return roots[i].score > roots[j].score
+		}
+		return roots[i].word < roots[j].word // a tie is broken the same way every run
 	})
 	if len(roots) > suggestRoots {
 		roots = roots[:suggestRoots]
@@ -269,7 +290,10 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		}
 	}
 	sort.Slice(matches, func(i, j int) bool {
-		return matches[i].score > matches[j].score
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return matches[i].word < matches[j].word
 	})
 
 	// Suggestions take the case the word was written in.
@@ -474,6 +498,9 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 		if t := strings.TrimRight(word, "."); t != "" && s.spellDepth(t, depth) {
 			return true
 		}
+	}
+	if _, ok := s.listed[word]; ok {
+		return true
 	}
 	if s.isWord(word, false) {
 		return true
@@ -908,30 +935,32 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	}
 
 	gs := goSpell{
-		affix:          affix,
-		roots:          make(map[string][]rootEntry),
-		upperRoots:     make(map[string][]string),
-		listed:         make(map[string]struct{}),
-		compounds:      make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
-		splitter:       newSplitter(affix.WordChars),
-		canCompound:    affix.compoundingEnabled(),
-		compoundMin:    affix.CompoundMin,
-		checkDup:       affix.CheckCompoundDup,
-		checkTriple:    affix.CheckCompoundTriple,
-		simplified:     affix.SimplifiedTriple,
-		checkCase:      affix.CheckCompoundCase,
-		checkRep:       affix.CheckCompoundRep,
-		wordMax:        affix.CompoundWordMax,
-		syllableMax:    affix.CompoundSyllable,
-		vowels:         affix.CompoundVowels,
-		reps:           affix.Replacements,
-		patterns:       affix.CompoundPatterns,
-		breaks:         newBreakRules(affix.Break),
-		ignored:        affix.Ignored,
-		forbiddenRoots: make(map[string][]rootEntry),
-		segments:       make(map[string]segmentUse),
-		spelled:        make(map[string]bool),
-		pairs:          make(map[string]struct{}),
+		dictData: &dictData{
+			affix:          affix,
+			roots:          make(map[string][]rootEntry),
+			upperRoots:     make(map[string][]string),
+			forbiddenRoots: make(map[string][]rootEntry),
+			pairs:          make(map[string]struct{}),
+			compounds:      make([]*regexp.Regexp, 0, len(affix.CompoundRule)),
+			splitter:       newSplitter(affix.WordChars),
+			canCompound:    affix.compoundingEnabled(),
+			compoundMin:    affix.CompoundMin,
+			checkDup:       affix.CheckCompoundDup,
+			checkTriple:    affix.CheckCompoundTriple,
+			simplified:     affix.SimplifiedTriple,
+			checkCase:      affix.CheckCompoundCase,
+			checkRep:       affix.CheckCompoundRep,
+			wordMax:        affix.CompoundWordMax,
+			syllableMax:    affix.CompoundSyllable,
+			vowels:         affix.CompoundVowels,
+			reps:           affix.Replacements,
+			patterns:       affix.CompoundPatterns,
+			breaks:         newBreakRules(affix.Break),
+			ignored:        affix.Ignored,
+		},
+		listed:   make(map[string]struct{}),
+		spelled:  make(map[string]bool),
+		segments: make(map[string]segmentUse),
 	}
 	if !affix.BreakDeclared {
 		gs.breaks = newBreakRules(defaultBreaks)
