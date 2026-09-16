@@ -332,3 +332,96 @@ cases:
     exit: 1
     want: |
       test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: based-on-styles-empty-resets
+    about: an empty BasedOnStyles clears the rule settings a file inherited, not only its styles
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = warning
+
+        [*.py]
+        BasedOnStyles =
+    args: test.py test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: based-on-styles-empty-then-rule
+    about: a rule named after the empty BasedOnStyles still runs
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+
+        [*.py]
+        BasedOnStyles =
+        write-good.Weasel = YES
+    args: test.py
+    exit: 0
+    want: |
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: rule-unset
+    about: UNSET drops an inherited setting, so the rule follows BasedOnStyles again
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        write-good.Weasel = YES
+
+        [*.py]
+        write-good.Weasel = UNSET
+    args: test.py test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: style-unset
+    about: UNSET on a style name drops what an earlier section said about the whole style
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+
+        [*.md]
+        write-good = NO
+
+        [*.md]
+        write-good = UNSET
+    args: test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: style-unset-keeps-rule-setting
+    about: UNSET on a style leaves a rule-level global setting in place
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = NO
+
+        [*.md]
+        write-good = NO
+
+        [*.md]
+        write-good = UNSET
+    args: test.md
+    exit: 0
+    want: ""

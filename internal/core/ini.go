@@ -184,6 +184,10 @@ func lastValue(key *ini.Key) string {
 	return values[len(values)-1]
 }
 
+// unsetValue drops what earlier sections said about a rule or style, so it
+// follows BasedOnStyles and its own level again.
+const unsetValue = "UNSET"
+
 func validateLevel(key, val string, levels map[string]string) bool {
 	options := []string{"YES", "suggestion", "warning", "error"}
 	if val == "NO" || !StringInSlice(val, options) {
@@ -526,6 +530,9 @@ func processConfig(uCfg *ini.File, cfg *Config, dry bool) (*ini.File, error) {
 			return nil, NewE201FromTarget(msg, k, cfg.RootINI)
 		} else if isParam, pErr := asRuleParam(k, lastValue(global.Key(k)), cfg); pErr != nil {
 			return nil, pErr
+		} else if lastValue(global.Key(k)) == unsetValue {
+			// Nothing precedes the global section, so there is nothing to unset.
+			continue
 		} else if !isParam {
 			cfg.GChecks[k] = validateLevel(k, lastValue(global.Key(k)), cfg.RuleToLevel)
 			cfg.Checks = append(cfg.Checks, k)
@@ -555,6 +562,9 @@ func processConfig(uCfg *ini.File, cfg *Config, dry bool) (*ini.File, error) {
 				}
 			} else if isParam, pErr := asRuleParam(k, lastValue(uCfg.Section(sec).Key(k)), cfg); pErr != nil {
 				return nil, pErr
+			} else if lastValue(uCfg.Section(sec).Key(k)) == unsetValue {
+				cfg.SUnsets[sec] = append(cfg.SUnsets[sec], k)
+				cfg.Checks = append(cfg.Checks, k)
 			} else if !isParam {
 				syntaxMap[k] = validateLevel(k, lastValue(uCfg.Section(sec).Key(k)), levelMap)
 				cfg.Checks = append(cfg.Checks, k)

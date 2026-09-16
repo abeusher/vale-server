@@ -40,6 +40,7 @@ type File struct {
 	Transform  string            // XLST transform
 	RealExt    string            // actual file extension
 	Checks     map[string]bool   // syntax-specific checks assigned in .vale
+	Unset      map[string]bool   // keys a section marked UNSET; no global setting applies
 	ChkToCtx   map[string]string // maps a temporary context to a particular check
 
 	// Levels holds the level each rule was given by the sections matching this
@@ -141,24 +142,42 @@ func NewFile(src string, config *Config) (*File, error) {
 	baseStyles := config.GBaseStyles
 	checks := make(map[string]bool)
 	levels := make(map[string]string)
+	unset := make(map[string]bool)
 
+	// Sections are visited in the order they were written, so a later one
+	// wins -- for this file, and no other. See #965.
 	for _, fp := range filepaths {
-		for _, sec := range config.StyleKeys {
-			if pat, found := config.SecToPat[sec]; found && pat.Match(fp) {
-				baseStyles = config.SBaseStyles[sec]
-			}
-		}
-
 		for _, sec := range config.RuleKeys {
-			if pat, found := config.SecToPat[sec]; found && pat.Match(fp) {
-				for k, v := range config.SChecks[sec] {
-					checks[k] = v
+			pat, found := config.SecToPat[sec]
+			if !found || !pat.Match(fp) {
+				continue
+			}
+
+			if styles, declared := config.SBaseStyles[sec]; declared {
+				baseStyles = styles
+				if len(styles) == 0 {
+					// `BasedOnStyles =` says nothing runs here: earlier
+					// sections no longer apply, and global settings are off.
+					checks = make(map[string]bool)
+					levels = make(map[string]string)
+					unset = make(map[string]bool)
+					for k := range config.GChecks {
+						checks[k] = false
+					}
 				}
-				// Sections are visited in the order they were written, so a
-				// later one wins -- for this file, and no other. See #965.
-				for k, v := range config.SLevels[sec] {
-					levels[k] = v
-				}
+			}
+
+			for k, v := range config.SChecks[sec] {
+				checks[k] = v
+				delete(unset, k)
+			}
+			for k, v := range config.SLevels[sec] {
+				levels[k] = v
+			}
+			for _, k := range config.SUnsets[sec] {
+				delete(checks, k)
+				delete(levels, k)
+				unset[k] = true
 			}
 		}
 	}
@@ -200,7 +219,7 @@ func NewFile(src string, config *Config) (*File, error) {
 
 	file := File{
 		NormedExt: ext, Format: format, RealExt: filepath.Ext(path),
-		BaseStyles: baseStyles, Checks: checks, Levels: levels,
+		BaseStyles: baseStyles, Checks: checks, Levels: levels, Unset: unset,
 		Lines: lines, Content: content,
 		Comments: make(map[string]bool), history: make(map[string]int),
 		simple: config.Flags.Simple, Transform: transform,

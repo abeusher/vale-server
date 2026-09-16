@@ -149,3 +149,73 @@ func TestDirectiveRegions(t *testing.T) {
 		t.Error("recorded a region without a position")
 	}
 }
+
+// An empty BasedOnStyles resets what a file inherited, its own keys still
+// apply after it, and UNSET drops one inherited key.
+func TestNewFileEmptyStylesResetAndUnset(t *testing.T) {
+	root := t.TempDir()
+	ini := "StylesPath = " + root + "\n\n" +
+		"[*]\nGoogle.Semicolons = warning\nVale.Spelling = NO\n\n" +
+		"[*.md]\nBasedOnStyles = Google\nGoogle.Colons = NO\n\n" +
+		"[**/docs/*.md]\nBasedOnStyles =\nGoogle.Headings = YES\n\n" +
+		"[**/api/*.md]\nGoogle.Colons = UNSET\n"
+
+	cfg, err := NewConfig(&CLIFlags{IgnoreGlobal: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = FromString(ini, cfg, false); err != nil {
+		t.Fatal(err)
+	}
+
+	open := func(dir string) *File {
+		t.Helper()
+		if err = os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(root, dir, "page.md")
+		if err = os.WriteFile(path, []byte("Hello.\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		f, ferr := NewFile(path, cfg)
+		if ferr != nil {
+			t.Fatal(ferr)
+		}
+		return f
+	}
+
+	other := open("other")
+	if len(other.BaseStyles) != 1 || other.BaseStyles[0] != "Google" {
+		t.Errorf("other: BaseStyles = %v, want [Google]", other.BaseStyles)
+	}
+	if v, ok := other.Checks["Google.Colons"]; !ok || v {
+		t.Errorf("other: Google.Colons = %v, %v; want false, true", v, ok)
+	}
+
+	docs := open("docs")
+	if len(docs.BaseStyles) != 0 {
+		t.Errorf("docs: BaseStyles = %v, want none", docs.BaseStyles)
+	}
+	for _, k := range []string{"Google.Semicolons", "Vale.Spelling"} {
+		if v, ok := docs.Checks[k]; !ok || v {
+			t.Errorf("docs: %s = %v, %v; want false, true (global setting turned off)", k, v, ok)
+		}
+	}
+	if _, ok := docs.Checks["Google.Colons"]; ok {
+		t.Error("docs: Google.Colons was inherited past an empty BasedOnStyles")
+	}
+	if v, ok := docs.Checks["Google.Headings"]; !ok || !v {
+		t.Errorf("docs: Google.Headings = %v, %v; want true, true (set after the reset)", v, ok)
+	}
+
+	api := open("api")
+	if _, ok := api.Checks["Google.Colons"]; ok {
+		t.Error("api: Google.Colons survived UNSET")
+	}
+	if !api.Unset["Google.Colons"] {
+		t.Error("api: Google.Colons is not marked unset")
+	}
+	if len(api.BaseStyles) != 1 || api.BaseStyles[0] != "Google" {
+		t.Errorf("api: BaseStyles = %v, want [Google]", api.BaseStyles)
+	}
+}

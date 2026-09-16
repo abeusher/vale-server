@@ -563,6 +563,17 @@ func lookup(settings map[string]bool, rule, style string) (bool, bool) {
 	return val, ok
 }
 
+// lookupUnless is lookup, skipping a key that is marked unset.
+func lookupUnless(settings, unset map[string]bool, rule, style string) (bool, bool) {
+	if val, ok := settings[rule]; ok && !unset[rule] {
+		return val, true
+	}
+	if val, ok := settings[style]; ok && !unset[style] {
+		return val, true
+	}
+	return false, false
+}
+
 // inScopeFor returns the rules that could run on blk, by scope alone.
 //
 // Built once per distinct block scope and reused. Everything else shouldRun
@@ -642,8 +653,9 @@ func (l *Linter) shouldRun(name string, f *core.File, chk check.Rule) bool {
 		run = true
 	}
 
-	// Has the check been disabled for all extensions?
-	if val, ok := lookup(l.Manager.Config.GChecks, name, style); ok && !run {
+	// Has the check been disabled for all extensions? A key the section
+	// marked UNSET takes no global setting either.
+	if val, ok := lookupUnless(l.Manager.Config.GChecks, f.Unset, name, style); ok && !run {
 		if !val {
 			return false
 		}

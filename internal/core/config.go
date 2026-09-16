@@ -209,6 +209,7 @@ type Config struct {
 	SBaseStyles       map[string][]string          // Syntax-specific base styles
 	SChecks           map[string]map[string]bool   // Syntax-specific checks
 	SLevels           map[string]map[string]string // Syntax-specific level changes
+	SUnsets           map[string][]string          // Keys a section marked UNSET
 	SkippedScopes     []string                     // A list of HTML blocks to ignore
 	Stylesheets       map[string]string            // XSLT stylesheet
 	TokenIgnores      map[string][]string          // A list of tokens to ignore
@@ -250,6 +251,7 @@ func NewConfig(flags *CLIFlags) (*Config, error) {
 	cfg.SBaseStyles = make(map[string][]string)
 	cfg.SChecks = make(map[string]map[string]bool)
 	cfg.SLevels = make(map[string]map[string]string)
+	cfg.SUnsets = make(map[string][]string)
 	cfg.SecToPat = make(map[string]glob.Glob)
 	cfg.Stylesheets = make(map[string]string)
 	cfg.TokenIgnores = make(map[string][]string)
