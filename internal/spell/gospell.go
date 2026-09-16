@@ -285,7 +285,9 @@ func (s *goSpell) spell(word string) bool {
 		return ok
 	}
 
-	ok = s.spellDepth(word, 0)
+	// The input is read as the dictionary is: through ICONV, and without
+	// the IGNORE characters.
+	ok = s.spellDepth(s.affix.ignore(s.inputConversion([]byte(word))), 0)
 
 	s.mu.Lock()
 	if len(s.spelled) > cacheMax {
@@ -320,8 +322,12 @@ func (s *goSpell) isWord(word string, folded bool) bool {
 		return false
 	}
 	for _, f := range s.analyses(word, false) {
-		if hasFlag(f.Flags, s.affix.CompoundOnly) ||
-			(folded && hasFlag(f.Flags, s.affix.KeepCaseFlag)) {
+		if hasFlag(f.Flags, s.affix.CompoundOnly) {
+			continue
+		}
+		// Under CHECKSHARPS, KEEPCASE on a word with ß only says its
+		// all-caps form is written with SS; it may still be capitalized.
+		if folded && hasFlag(f.Flags, s.affix.KeepCaseFlag) && !s.hasSharp(f.Word) {
 			continue
 		}
 		return true
@@ -330,13 +336,17 @@ func (s *goSpell) isWord(word string, folded bool) bool {
 }
 
 // isWordUpper reports whether an all-caps word is the upper-cased form of
-// one some entry generates.
+// one some entry generates. Under CHECKSHARPS, a KEEPCASE word with ß may be
+// upper-cased, but only written with SS.
 func (s *goSpell) isWordUpper(word string) bool {
-	for _, f := range s.analyses(word, true) {
+	for _, f := range s.analyses(s.upperKey(word), true) {
 		if s.isForbidden(f.Word) {
 			continue
 		}
-		if hasFlag(f.Flags, s.affix.CompoundOnly) || hasFlag(f.Flags, s.affix.KeepCaseFlag) {
+		if hasFlag(f.Flags, s.affix.CompoundOnly) {
+			continue
+		}
+		if hasFlag(f.Flags, s.affix.KeepCaseFlag) && !(s.hasSharp(f.Word) && !s.hasSharp(word)) {
 			continue
 		}
 		return true
@@ -423,8 +433,19 @@ func (s *goSpell) spellDepth(word string, depth int) bool {
 			return true
 		}
 	case allCap:
-		if s.isWordUpper(word) || s.isWord(lower, true) || s.isWord(capitalize(lower), true) {
+		if s.isWordUpper(word) {
 			return true
+		}
+		// A KEEPCASE word is not reached by folding an all-caps one, and
+		// under CHECKSHARPS an all-caps ß word is written with SS.
+		for _, form := range []string{lower, capitalize(lower)} {
+			for _, f := range s.analyses(form, false) {
+				if s.isForbidden(f.Word) || hasFlag(f.Flags, s.affix.CompoundOnly) ||
+					hasFlag(f.Flags, s.affix.KeepCaseFlag) || s.hasSharp(f.Word) {
+					continue
+				}
+				return true
+			}
 		}
 	case huhInitCap:
 		if s.isWord(lowerFirst(word), true) {
@@ -894,6 +915,7 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 		}
 
 		if hasFlag(flags, affix.ForbiddenFlag) {
+			word = affix.ignore(word)
 			gs.forbiddenRoots[word] = append(gs.forbiddenRoots[word], rootEntry{flags: flags})
 			gs.noteUpper(word)
 			continue
@@ -941,26 +963,53 @@ func newGoSpellReader(aff, dic io.Reader) (*goSpell, error) {
 	}
 
 	if len(affix.IconvReplacements) > 0 {
-		gs.ireplacer = strings.NewReplacer(affix.IconvReplacements...)
+		// Hunspell converts by the longest matching rule; the replacer
+		// takes the first listed, so the longest are listed first.
+		pairs := make([][2]string, 0, len(affix.IconvReplacements)/2)
+		for i := 0; i+1 < len(affix.IconvReplacements); i += 2 {
+			pairs = append(pairs, [2]string{affix.IconvReplacements[i], affix.IconvReplacements[i+1]})
+		}
+		sort.SliceStable(pairs, func(i, j int) bool { return len(pairs[i][0]) > len(pairs[j][0]) })
+		flat := make([]string, 0, 2*len(pairs))
+		for _, p := range pairs {
+			flat = append(flat, p[0], p[1])
+		}
+		gs.ireplacer = strings.NewReplacer(flat...)
 	}
 	return &gs, nil
 }
 
 // addRoot records a `.dic` entry.
 func (s *goSpell) addRoot(word string, flags []string) {
+	word = s.affix.ignore(word)
 	s.roots[word] = append(s.roots[word], rootEntry{flags: flags})
 	s.noteUpper(word)
 }
 
-// noteUpper indexes a root with a capital by its upper-cased form.
+// noteUpper indexes a root with a capital, or a ß, by its upper-cased form.
 func (s *goSpell) noteUpper(word string) {
-	if word == strings.ToLower(word) {
+	if word == strings.ToLower(word) && !s.hasSharp(word) {
 		return
 	}
-	upper := strings.ToUpper(word)
+	upper := s.upperKey(word)
 	if !stringIn(word, s.upperRoots[upper]) {
 		s.upperRoots[upper] = append(s.upperRoots[upper], word)
 	}
+}
+
+// upperKey upper-cases a word as an all-caps writer would: under
+// CHECKSHARPS, ß and ẞ become SS.
+func (s *goSpell) upperKey(word string) string {
+	upper := strings.ToUpper(word)
+	if s.affix.CheckSharps {
+		upper = strings.NewReplacer("ß", "SS", "ẞ", "SS").Replace(upper)
+	}
+	return upper
+}
+
+// hasSharp reports whether word holds a sharp s, in either case.
+func (s *goSpell) hasSharp(word string) bool {
+	return s.affix.CheckSharps && strings.ContainsAny(word, "ßẞ")
 }
 
 // newGoSpell from AFF and DIC Hunspell filenames

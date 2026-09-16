@@ -116,6 +116,8 @@ type dictConfig struct {
 	CompoundForbidFlag string   // COMPOUNDFORBIDFLAG: a form kept out of compounds
 	ForceUCaseFlag     string   // FORCEUCASE: a compound ending here is capitalized
 	Aliases            []string // AF: flag sets that an entry names by number
+	IgnoreChars        string   // IGNORE: characters dropped from words and affixes
+	CheckSharps        bool     // CHECKSHARPS: an all-caps word writes ß as SS
 
 	BreakDeclared       bool // any BREAK line; otherwise Hunspell's defaults apply
 	CheckCompoundDup    bool // CHECKCOMPOUNDDUP: no segment twice in a row
@@ -694,6 +696,12 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 				p.repl = parts[3]
 			}
 			aff.CompoundPatterns = append(aff.CompoundPatterns, p)
+		case "CHECKSHARPS":
+			aff.CheckSharps = true
+		case "IGNORE":
+			if len(parts) >= 2 {
+				aff.IgnoreChars = parts[1]
+			}
 		case "AF":
 			if len(parts) < 2 {
 				return nil, fmt.Errorf("AF stanza had %d fields, expected 2", len(parts))
@@ -859,6 +867,35 @@ func newDictConfig(file io.Reader) (*dictConfig, error) { //nolint:funlen
 		return nil, err
 	}
 
+	aff.dropIgnored()
 	aff.buildIndex()
 	return &aff, nil
+}
+
+// ignore returns s without the IGNORE characters.
+func (a dictConfig) ignore(s string) string {
+	if a.IgnoreChars == "" {
+		return s
+	}
+	return strings.Map(func(r rune) rune {
+		if strings.ContainsRune(a.IgnoreChars, r) {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// dropIgnored takes the IGNORE characters out of the affix texts, as they
+// are taken out of every word.
+func (a *dictConfig) dropIgnored() {
+	if a.IgnoreChars == "" {
+		return
+	}
+	for flag, af := range a.AffixMap {
+		for i := range af.Rules {
+			af.Rules[i].AffixText = a.ignore(af.Rules[i].AffixText)
+			af.Rules[i].Strip = a.ignore(af.Rules[i].Strip)
+		}
+		a.AffixMap[flag] = af
+	}
 }

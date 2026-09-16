@@ -161,7 +161,7 @@ func (s *goSpell) readings(word string, fold bool, roots map[string][]rootEntry)
 		return nil
 	}
 	if fold {
-		key = strings.ToUpper
+		key = s.upperKey
 		rootsOf = func(cand string) []string {
 			var found []string
 			for _, root := range s.upperRoots[cand] {

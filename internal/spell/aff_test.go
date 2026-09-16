@@ -502,10 +502,10 @@ func TestBreakRulesParse(t *testing.T) {
 func TestUnsupportedDirectivesAreRecorded(t *testing.T) {
 	affContent := `# a comment line
 SET UTF-8
-CHECKSHARPS
+COMPLEXPREFIXES
 MAP 2
 MAP uü
-CHECKSHARPS
+COMPLEXPREFIXES
 TRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ'
 
 SFX A Y 1
@@ -516,7 +516,7 @@ SFX A 0 s .
 		t.Fatalf("newDictConfig error: %v", err)
 	}
 
-	want := []string{"CHECKSHARPS", "MAP"}
+	want := []string{"COMPLEXPREFIXES", "MAP"}
 	if !reflect.DeepEqual(aff.Ignored, want) {
 		t.Errorf("Ignored = %v, want %v", aff.Ignored, want)
 	}
