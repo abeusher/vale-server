@@ -189,13 +189,58 @@ func (s *goSpell) keys() []string {
 }
 
 func (s *goSpell) suggest(word string) []wordMatch {
+	var hits []wordMatch
+	seen := map[string]struct{}{word: {}}
+	add := func(w string) {
+		if _, ok := seen[w]; ok {
+			return
+		}
+		seen[w] = struct{}{}
+		// Earlier is better; the score keeps that order across checkers.
+		hits = append(hits, wordMatch{w, 1 - float64(len(hits))/1e6})
+	}
+
+	// The word in another case, then the dictionary's own spelling of it,
+	// then what the REP table and a split make of it: Hunspell's order.
+	lower := s.lowerWord(word)
+	for _, v := range []string{lower, capitalize(lower), s.upperKey(word)} {
+		if v != word && s.spellDepth(v, 0) {
+			add(v)
+		}
+	}
+	for _, f := range append(s.analyses(s.upperKey(word), true), s.analyses(lower, false)...) {
+		if strings.EqualFold(f.Word, word) && !hasFlag(f.Flags, s.affix.CompoundOnly) {
+			add(f.Word)
+		}
+	}
+	for _, rep := range s.reps {
+		from, to := rep[0], strings.ReplaceAll(rep[1], "_", " ")
+		for at := strings.Index(word, from); at >= 0; {
+			candidate := word[:at] + to + word[at+len(from):]
+			if s.spellPhrase(candidate) {
+				add(candidate)
+			}
+			next := strings.Index(word[at+1:], from)
+			if next < 0 {
+				break
+			}
+			at += 1 + next
+		}
+	}
+	for i := 1; i < len(word); i++ {
+		if left, right := word[:i], word[i:]; s.spellDepth(left, 0) && s.spellDepth(right, 0) {
+			add(left + " " + right)
+		}
+	}
+	if len(hits) >= 5 {
+		return hits[:5]
+	}
+
+	// Then the closest words. Roots are ranked first, and the forms of the
+	// closest ones after, so an inflected form is still found without
+	// generating every form. Distance is measured case-insensitively; the
+	// case comes back below.
 	metric := metrics.NewLevenshtein()
-
-	// Distance is measured case-insensitively; the case comes back below.
-	lower := strings.ToLower(word)
-
-	// Roots are ranked first, and the forms of the closest ones after, so
-	// an inflected form is still found without generating every form.
 	roots := []wordMatch{}
 	for _, option := range s.keys() {
 		sim := strutil.Similarity(option, lower, metric)
@@ -208,16 +253,16 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		roots = roots[:suggestRoots]
 	}
 
-	seen := map[string]struct{}{}
+	formSeen := map[string]struct{}{}
 	matches := []wordMatch{}
 	e := s.affix.expander(nil, nil)
 	for _, r := range roots {
 		for _, entry := range s.roots[r.word] {
 			for _, f := range e.root(r.word, entry.flags) {
-				if _, ok := seen[f.Word]; ok || len(seen) > suggestForms {
+				if _, ok := formSeen[f.Word]; ok || len(formSeen) > suggestForms {
 					continue
 				}
-				seen[f.Word] = struct{}{}
+				formSeen[f.Word] = struct{}{}
 				sim := strutil.Similarity(f.Word, lower, metric)
 				matches = append(matches, wordMatch{f.Word, sim})
 			}
@@ -227,24 +272,37 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		return matches[i].score > matches[j].score
 	})
 
-	hits := matches
-	if len(hits) > 5 {
-		hits = hits[:5]
-	}
-
 	// Suggestions take the case the word was written in.
+	restore := func(w string) string { return w }
 	switch {
 	case allUpper(word):
-		for i := range hits {
-			hits[i].word = strings.ToUpper(hits[i].word)
-		}
+		restore = s.upperKey
 	case initialUpper(word):
-		for i := range hits {
-			hits[i].word = capitalize(hits[i].word)
+		restore = capitalize
+	}
+	for _, m := range matches {
+		if len(hits) >= 5 {
+			break
+		}
+		w := restore(m.word)
+		if _, ok := seen[w]; ok {
+			continue
+		}
+		seen[w] = struct{}{}
+		hits = append(hits, wordMatch{w, m.score})
+	}
+	return hits
+}
+
+// spellPhrase reports whether every space-separated part of a phrase is a
+// word, for a REP entry that writes one word as two.
+func (s *goSpell) spellPhrase(phrase string) bool {
+	for _, part := range strings.Fields(phrase) {
+		if !s.spellDepth(part, 0) {
+			return false
 		}
 	}
-
-	return hits
+	return true
 }
 
 // suggestRoots is how many of the closest roots are expanded for
