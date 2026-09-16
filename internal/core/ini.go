@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bufio"
 	"fmt"
 	"io/fs"
 	"os"
@@ -90,7 +91,24 @@ func splitEscaped(s string, delim rune) []string {
 	return append(vals, buf.String())
 }
 
+// loadVocab adds a vocabulary's terms to the project's, for a top-level
+// `Vocab`.
 func loadVocab(root string, cfg *Config) error {
+	vocab, err := loadVocabulary(root, cfg)
+	if err != nil {
+		return err
+	}
+	cfg.AcceptedTokens = append(cfg.AcceptedTokens, vocab.Accepted...)
+	cfg.RejectedTokens = append(cfg.RejectedTokens, vocab.Rejected...)
+	return nil
+}
+
+// loadVocabulary reads a vocabulary by name, once.
+func loadVocabulary(root string, cfg *Config) (*Vocabulary, error) {
+	if vocab, ok := cfg.Vocabularies[root]; ok {
+		return vocab, nil
+	}
+
 	target := ""
 	tried := []string{}
 	for _, p := range cfg.SearchPaths() {
@@ -103,25 +121,54 @@ func loadVocab(root string, cfg *Config) error {
 	}
 
 	if target == "" {
-		return NewE100("vocab", fmt.Errorf(
+		return nil, NewE100("vocab", fmt.Errorf(
 			"'%s' vocabulary not found; searched: %s",
 			root, strings.Join(tried, ", ")))
 	}
 
+	vocab := &Vocabulary{}
 	err := system.Walk(target, func(fp string, info fs.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		name := info.Name()
-		if name == "accept.txt" {
-			return cfg.AddWordListFile(fp, true)
-		} else if name == "reject.txt" {
-			return cfg.AddWordListFile(fp, false)
+		switch info.Name() {
+		case "accept.txt":
+			terms, rerr := readWordList(fp)
+			vocab.Accepted = append(vocab.Accepted, terms...)
+			return rerr
+		case "reject.txt":
+			terms, rerr := readWordList(fp)
+			vocab.Rejected = append(vocab.Rejected, terms...)
+			return rerr
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 
-	return err
+	cfg.Vocabularies[root] = vocab
+	return vocab, nil
+}
+
+// readWordList reads a vocabulary file: one term per line, `# ` a comment.
+func readWordList(path string) ([]string, error) {
+	fd, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer fd.Close()
+
+	var terms []string
+	scanner := bufio.NewScanner(fd)
+	for scanner.Scan() {
+		word := strings.TrimSpace(scanner.Text())
+		if len(word) == 0 || strings.HasPrefix(word, "# ") {
+			continue
+		}
+		terms = append(terms, word)
+	}
+	return terms, scanner.Err()
 }
 
 // validateLevel reports whether `key` names a rule that should run, recording
@@ -199,6 +246,20 @@ func validateLevel(key, val string, levels map[string]string) bool {
 }
 
 var syntaxOpts = map[string]func(string, *ini.Section, *Config) error{
+	"Vocab": func(lbl string, sec *ini.Section, cfg *Config) error {
+		names := mergeValues(sec.Key("Vocab").StringsWithShadows(","))
+		for _, name := range names {
+			if _, err := loadVocabulary(name, cfg); err != nil {
+				return err
+			}
+			// The vocabulary's own Terms and Avoid run only where a section
+			// names it; NewFile turns them on for its files.
+			cfg.GChecks["Vale."+name+".Terms"] = false
+			cfg.GChecks["Vale."+name+".Avoid"] = false
+		}
+		cfg.SVocab[lbl] = append(cfg.SVocab[lbl], names...)
+		return nil
+	},
 	"BasedOnStyles": func(lbl string, sec *ini.Section, cfg *Config) error {
 		pat, err := glob.Compile(lbl)
 		if err != nil {
@@ -554,12 +615,12 @@ func processConfig(uCfg *ini.File, cfg *Config, dry bool) (*ini.File, error) {
 		syntaxMap := make(map[string]bool)
 		levelMap := make(map[string]string)
 		for _, k := range uCfg.Section(sec).KeyStrings() {
-			if _, option := coreOpts[k]; option {
-				return nil, NewE201FromTarget(fmt.Sprintf(coreError, k), k, cfg.RootINI)
-			} else if f, found := syntaxOpts[k]; found {
+			if f, found := syntaxOpts[k]; found {
 				if err = f(sec, uCfg.Section(sec), cfg); err != nil && !dry {
 					return nil, err
 				}
+			} else if _, option := coreOpts[k]; option {
+				return nil, NewE201FromTarget(fmt.Sprintf(coreError, k), k, cfg.RootINI)
 			} else if isParam, pErr := asRuleParam(k, lastValue(uCfg.Section(sec).Key(k)), cfg); pErr != nil {
 				return nil, pErr
 			} else if lastValue(uCfg.Section(sec).Key(k)) == unsetValue {

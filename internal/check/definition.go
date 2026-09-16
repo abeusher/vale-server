@@ -16,6 +16,49 @@ import (
 	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
+// cloneRule copies a rule definition, so a built-in one is never changed.
+func cloneRule(generic baseCheck) baseCheck {
+	clone := make(baseCheck, len(generic))
+	for k, v := range generic {
+		clone[k] = v
+	}
+	return clone
+}
+
+// sectionVocab is the accepted terms a file's sections add to the
+// project's, compiled once per set of vocabularies.
+type sectionVocab struct {
+	exceptRe, phraseRe *rx.Regexp
+}
+
+// vocabFor returns the terms f's sections accept, or nil.
+func vocabFor(cfg *core.Config, f *core.File) *sectionVocab {
+	if f == nil || cfg == nil || len(f.Vocab) == 0 {
+		return nil
+	}
+	key := "vocab\x00" + strings.Join(f.Vocab, "\x00")
+	v := cfg.Cached(key, func() any {
+		var terms []string
+		for _, name := range f.Vocab {
+			if vocab := cfg.Vocabularies[name]; vocab != nil {
+				terms = append(terms, vocab.Accepted...)
+			}
+		}
+		re, err := updateExceptions(nil, terms, true)
+		if err != nil {
+			re = nil
+		}
+		return &sectionVocab{exceptRe: re, phraseRe: buildPhraseRe(nil, terms, true)}
+	})
+	return v.(*sectionVocab) //nolint:errcheck // only *sectionVocab is stored
+}
+
+// accepts reports whether the sections accept word, or the phrase it sits
+// in at loc in txt.
+func (v *sectionVocab) accepts(word, txt string, loc []int) bool {
+	return v != nil && (isMatch(v.exceptRe, word) || withinPhrase(v.phraseRe, txt, loc))
+}
+
 // FilterEnv is the environment passed to the `--filter` flag.
 type FilterEnv struct {
 	Rules []Definition

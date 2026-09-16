@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/adrg/xdg"
 	"github.com/bmatcuk/doublestar/v4"
@@ -210,6 +211,8 @@ type Config struct {
 	SChecks           map[string]map[string]bool   // Syntax-specific checks
 	SLevels           map[string]map[string]string // Syntax-specific level changes
 	SUnsets           map[string][]string          // Keys a section marked UNSET
+	SVocab            map[string][]string          // Vocabularies a section names
+	Vocabularies      map[string]*Vocabulary       // Every vocabulary loaded, by name
 	SkippedScopes     []string                     // A list of HTML blocks to ignore
 	Stylesheets       map[string]string            // XSLT stylesheet
 	TokenIgnores      map[string][]string          // A list of tokens to ignore
@@ -222,10 +225,12 @@ type Config struct {
 	AcceptedTokens []string `json:"-"` // Project-specific vocabulary (okay)
 	RejectedTokens []string `json:"-"` // Project-specific vocabulary (avoid)
 
-	FallbackPath string               `json:"-"`
-	SecToPat     map[string]glob.Glob `json:"-"`
-	Styles       []string             `json:"-"`
-	Views        map[string]*View     `json:"-"`
+	FallbackPath string `json:"-"`
+
+	cache    *sync.Map            // what checks build from this configuration, by key
+	SecToPat map[string]glob.Glob `json:"-"`
+	Styles   []string             `json:"-"`
+	Views    map[string]*View     `json:"-"`
 
 	NLPEndpoint string // An external API to call for NLP-related work.
 
@@ -252,6 +257,9 @@ func NewConfig(flags *CLIFlags) (*Config, error) {
 	cfg.SChecks = make(map[string]map[string]bool)
 	cfg.SLevels = make(map[string]map[string]string)
 	cfg.SUnsets = make(map[string][]string)
+	cfg.SVocab = make(map[string][]string)
+	cfg.Vocabularies = make(map[string]*Vocabulary)
+	cfg.cache = &sync.Map{}
 	cfg.SecToPat = make(map[string]glob.Glob)
 	cfg.Stylesheets = make(map[string]string)
 	cfg.TokenIgnores = make(map[string][]string)
@@ -322,6 +330,37 @@ func (c *Config) SearchPaths() []string {
 		return []string{""}
 	}
 	return c.Paths
+}
+
+// A Vocabulary is what one `config/vocabularies` directory holds.
+type Vocabulary struct {
+	Accepted []string
+	Rejected []string
+}
+
+// SectionVocabs names every vocabulary some section uses.
+func (c *Config) SectionVocabs() []string {
+	var names []string
+	for _, sec := range c.RuleKeys {
+		for _, name := range c.SVocab[sec] {
+			if !StringInSlice(name, names) {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
+// Cached returns what build makes for key, building it once per config.
+func (c *Config) Cached(key string, build func() any) any {
+	if c.cache == nil {
+		c.cache = &sync.Map{}
+	}
+	if v, ok := c.cache.Load(key); ok {
+		return v
+	}
+	v, _ := c.cache.LoadOrStore(key, build())
+	return v
 }
 
 // AddWordListFile adds vocab terms from a provided file.

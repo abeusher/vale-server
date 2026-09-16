@@ -517,29 +517,53 @@ func (mgr *Manager) loadStyles(styles []string) error {
 }
 
 func (mgr *Manager) loadVocabRules() {
-	if len(mgr.Config.AcceptedTokens) > 0 {
-		vocab := defaultRules["Terms"]
-		for _, term := range mgr.Config.AcceptedTokens {
-			vocab["swap"].(map[string]string)[strings.ToLower(term)] = term
-		}
-		if level, ok := mgr.Config.RuleToLevel["Vale.Terms"]; ok {
-			vocab["level"] = level
-		}
-		rule, _ := buildRule(mgr.Config, vocab)
-		mgr.rules["Vale.Terms"] = rule
-	}
+	mgr.addTerms("Vale.Terms", mgr.Config.AcceptedTokens)
+	mgr.addAvoid("Vale.Avoid", mgr.Config.RejectedTokens)
 
-	if len(mgr.Config.RejectedTokens) > 0 {
-		avoid := defaultRules["Avoid"]
-		for _, term := range mgr.Config.RejectedTokens {
-			avoid["tokens"] = append(avoid["tokens"].([]string), term)
+	// A vocabulary a section names gets rules of its own, which the
+	// configuration turns on only for that section's files.
+	for _, name := range mgr.Config.SectionVocabs() {
+		vocab := mgr.Config.Vocabularies[name]
+		if vocab == nil {
+			continue
 		}
-		if level, ok := mgr.Config.RuleToLevel["Vale.Avoid"]; ok {
-			avoid["level"] = level
-		}
-		rule, _ := buildRule(mgr.Config, avoid)
-		mgr.rules["Vale.Avoid"] = rule
+		mgr.addTerms("Vale."+name+".Terms", vocab.Accepted)
+		mgr.addAvoid("Vale."+name+".Avoid", vocab.Rejected)
 	}
+}
+
+// addTerms adds a Terms rule, which reports an accepted term in the wrong
+// case, from the given terms.
+func (mgr *Manager) addTerms(name string, terms []string) {
+	if len(terms) == 0 {
+		return
+	}
+	swap := make(map[string]string, len(terms))
+	for _, term := range terms {
+		swap[strings.ToLower(term)] = term
+	}
+	vocab := cloneRule(defaultRules["Terms"])
+	vocab["name"], vocab["swap"] = name, swap
+	if level, ok := mgr.Config.RuleToLevel[name]; ok {
+		vocab["level"] = level
+	}
+	rule, _ := buildRule(mgr.Config, vocab)
+	mgr.rules[name] = rule
+}
+
+// addAvoid adds an Avoid rule, which reports a rejected term, from the
+// given terms.
+func (mgr *Manager) addAvoid(name string, terms []string) {
+	if len(terms) == 0 {
+		return
+	}
+	avoid := cloneRule(defaultRules["Avoid"])
+	avoid["name"], avoid["tokens"] = name, append([]string(nil), terms...)
+	if level, ok := mgr.Config.RuleToLevel[name]; ok {
+		avoid["level"] = level
+	}
+	rule, _ := buildRule(mgr.Config, avoid)
+	mgr.rules[name] = rule
 }
 
 func (mgr *Manager) hasStyle(name string) bool {

@@ -173,7 +173,8 @@ func (e Existence) groupsFor(blk nlp.Block, sub []int) []string {
 // This is simplest of the available extension points: it looks for any matches
 // of its internal `pattern` (calculated from `NewExistence`) against the
 // provided text.
-func (e Existence) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Alert, error) {
+func (e Existence) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
+	vocab := vocabFor(cfg, f)
 	alerts := []core.Alert{}
 
 	// Rule out the pattern before the engine sees it: almost every rule is
@@ -191,7 +192,8 @@ func (e Existence) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Al
 		}
 
 		observed := strings.TrimSpace(converted)
-		if !isMatch(e.exceptRe, observed) && !withinPhrase(e.phraseRe, blk.Text, loc) {
+		if !isMatch(e.exceptRe, observed) && !withinPhrase(e.phraseRe, blk.Text, loc) &&
+			!vocab.accepts(observed, blk.Text, loc) {
 			a, erra := alertWithGroups(e.Definition, loc, converted,
 				e.groupsFor(blk, sub), cfg)
 			if erra != nil {

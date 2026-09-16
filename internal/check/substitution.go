@@ -156,7 +156,8 @@ func leadingGroup(expr string) string {
 // Run executes the `substitution`-based rule.
 //
 // The rule looks for one pattern and then suggests a replacement.
-func (s Substitution) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Alert, error) {
+func (s Substitution) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
+	vocab := vocabFor(cfg, f)
 	var alerts []core.Alert
 
 	txt := blk.Text
@@ -204,7 +205,8 @@ func (s Substitution) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core
 				} else {
 					same = matchToken(expected, observed, false)
 				}
-				if !same && !isMatch(s.exceptRe, observed) && !withinPhrase(s.phraseRe, txt, loc) {
+				if !same && !isMatch(s.exceptRe, observed) && !withinPhrase(s.phraseRe, txt, loc) &&
+					!vocab.accepts(observed, txt, loc) {
 					action := s.Fields().Action
 					if action.Name == "replace" && len(action.Params) == 0 {
 						action.Params = getOptions(expected)

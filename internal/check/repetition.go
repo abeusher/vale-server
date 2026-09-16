@@ -63,7 +63,8 @@ func NewRepetition(cfg *core.Config, generic baseCheck, path string) (Repetition
 // Run executes the `repetition`-based rule.
 //
 // The rule looks for repeated matches of its regex -- such as "this this".
-func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Alert, error) {
+func (o Repetition) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
+	vocab := vocabFor(cfg, f)
 	var curr, prev string
 	var hit bool
 	var ploc []int
@@ -105,7 +106,8 @@ func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.A
 				//
 				// All plans except a Personal plan can use Redis. Redis ...
 				floc := []int{ploc[0], loc[1]}
-				if !isMatch(o.exceptRe, converted) && !withinPhrase(o.phraseRe, txt, floc) {
+				if !isMatch(o.exceptRe, converted) && !withinPhrase(o.phraseRe, txt, floc) &&
+					!vocab.accepts(converted, txt, floc) {
 					a, erra := makeAlert(o.Definition, floc, blk, cfg)
 					if erra != nil {
 						return alerts, erra

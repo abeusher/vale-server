@@ -185,8 +185,9 @@ func NewSpelling(cfg *core.Config, generic baseCheck, path string) (Spelling, er
 }
 
 // Run performs spell-checking on the provided text.
-func (s Spelling) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert, error) {
+func (s Spelling) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
 	var alerts []core.Alert
+	vocab := vocabFor(cfg, f)
 
 	// Mask any accepted multi-word phrases (e.g. `mea culpa`) so their
 	// component words aren't spell-checked individually, while the same words
@@ -233,7 +234,7 @@ OUTER:
 			}
 		}
 
-		if s.gs.Spell(word) || isMatch(s.exceptRe, word) {
+		if s.gs.Spell(word) || isMatch(s.exceptRe, word) || vocab.accepts(word, checkTxt, []int{offsets[i], offsets[i] + len(found)}) {
 			continue
 		}
 
@@ -246,7 +247,7 @@ OUTER:
 			// and only its parts are.
 			if parts := splitIdentifier(found); len(parts) != 1 || parts[0].text != found {
 				for _, part := range parts {
-					if s.checkPart(part.text) {
+					if s.checkPart(part.text) || vocab.accepts(part.text, "", nil) {
 						continue
 					}
 					a := s.alert(part.text, offset+part.at, len(part.text))

@@ -41,6 +41,7 @@ type File struct {
 	RealExt    string            // actual file extension
 	Checks     map[string]bool   // syntax-specific checks assigned in .vale
 	Unset      map[string]bool   // keys a section marked UNSET; no global setting applies
+	Vocab      []string          // vocabularies the file's sections name
 	ChkToCtx   map[string]string // maps a temporary context to a particular check
 
 	// Levels holds the level each rule was given by the sections matching this
@@ -143,6 +144,7 @@ func NewFile(src string, config *Config) (*File, error) {
 	checks := make(map[string]bool)
 	levels := make(map[string]string)
 	unset := make(map[string]bool)
+	var vocab []string
 
 	// Sections are visited in the order they were written, so a later one
 	// wins -- for this file, and no other. See #965.
@@ -178,6 +180,13 @@ func NewFile(src string, config *Config) (*File, error) {
 				delete(checks, k)
 				delete(levels, k)
 				unset[k] = true
+			}
+			for _, name := range config.SVocab[sec] {
+				if !StringInSlice(name, vocab) {
+					vocab = append(vocab, name)
+				}
+				checks["Vale."+name+".Terms"] = true
+				checks["Vale."+name+".Avoid"] = true
 			}
 		}
 	}
@@ -219,7 +228,7 @@ func NewFile(src string, config *Config) (*File, error) {
 
 	file := File{
 		NormedExt: ext, Format: format, RealExt: filepath.Ext(path),
-		BaseStyles: baseStyles, Checks: checks, Levels: levels, Unset: unset,
+		BaseStyles: baseStyles, Checks: checks, Levels: levels, Unset: unset, Vocab: vocab,
 		Lines: lines, Content: content,
 		Comments: make(map[string]bool), history: make(map[string]int),
 		simple: config.Flags.Simple, Transform: transform,

@@ -495,3 +495,38 @@ cases:
       styles/Demo/Rule.yml:2:30:Vale.Spelling:Did you really mean 'plaese'?
       styles/Demo/Rule.yml:4:5:Vale.Spelling:Did you really mean 'typpo'?
       styles/Demo/Rule.yml:5:11:Vale.Spelling:Did you really mean 'typpo'?
+
+  - name: vocab-per-section
+    about: a section's Vocab adds its terms for that section's files only, with
+      Terms and Avoid rules of its own; the top-level Vocab is unchanged
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = Base
+
+        [*]
+        BasedOnStyles = Vale
+
+        [api/*.md]
+        Vocab = API
+      styles/config/vocabularies/Base/accept.txt: |
+        Zorbblat
+      styles/config/vocabularies/API/accept.txt: |
+        Quxelate
+        kubectl
+      styles/config/vocabularies/API/reject.txt: |
+        k8s
+      api/page.md: |
+        Run kubectl on Zorbblat with Quxelate, not quxelate or k8s.
+      docs/page.md: |
+        Run kubectl on Zorbblat with Quxelate, not quxelate or k8s.
+    args: api/page.md docs/page.md
+    exit: 1
+    want: |
+      api/page.md:1:44:Vale.API.Terms:Use 'Quxelate' instead of 'quxelate'.
+      api/page.md:1:44:Vale.Spelling:Did you really mean 'quxelate'?
+      api/page.md:1:56:Vale.API.Avoid:Avoid using 'k8s'.
+      docs/page.md:1:5:Vale.Spelling:Did you really mean 'kubectl'?
+      docs/page.md:1:30:Vale.Spelling:Did you really mean 'Quxelate'?
+      docs/page.md:1:44:Vale.Spelling:Did you really mean 'quxelate'?
