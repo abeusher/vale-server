@@ -1,5 +1,10 @@
 package check
 
+import (
+	"unicode"
+	"unicode/utf8"
+)
+
 // The default spelling filters, hand-written.
 //
 // A spelling rule runs these against every word of every block, and blocks
@@ -85,4 +90,58 @@ func isWordByte(c byte) bool {
 // skippedByDefault reports whether any default filter would skip the word.
 func skippedByDefault(word string) bool {
 	return skipsNonWord(word) || skipsTrailingCaps(word) || skipsCamel(word)
+}
+
+// skipsNonIdentifier reports whether a word holds a character no identifier
+// does: anything outside letters, digits, `_`, `-`, and `'`.
+func skipsNonIdentifier(word string) bool {
+	for _, r := range word {
+		switch {
+		case unicode.IsLetter(r), unicode.IsDigit(r), r == '_', r == '-', r == '\'':
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// identifierPart is one word within an identifier and where it starts.
+type identifierPart struct {
+	text string
+	at   int
+}
+
+// splitIdentifier breaks an identifier at an underscore, a hyphen, a digit,
+// and a change of case: `getHTTPResponse_v2` is get, HTTP, Response, v.
+// The last capital of a run starts the next part, so HTTPServer is HTTP and
+// Server.
+func splitIdentifier(word string) []identifierPart {
+	var parts []identifierPart
+	runes := []rune(word)
+	start, at := -1, 0 // start: byte offset of the current part, or -1
+	flush := func(end int) {
+		if start >= 0 && end > start {
+			parts = append(parts, identifierPart{text: word[start:end], at: start})
+		}
+		start = -1
+	}
+	for i, r := range runes {
+		size := utf8.RuneLen(r)
+		switch {
+		case !unicode.IsLetter(r):
+			flush(at)
+		case start < 0:
+			start = at
+		case unicode.IsUpper(r) && unicode.IsLower(runes[i-1]):
+			flush(at)
+			start = at
+		case unicode.IsUpper(r) && i+1 < len(runes) && unicode.IsLower(runes[i+1]) &&
+			unicode.IsUpper(runes[i-1]):
+			flush(at)
+			start = at
+		}
+		at += size
+	}
+	flush(at)
+	return parts
 }

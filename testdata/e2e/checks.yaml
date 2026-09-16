@@ -412,3 +412,34 @@ cases:
       test.txt:21:5:LanguageTool.APOS_ARE:Did you mean "endpoints" instead of "endpoint's"?
       test.txt:25:1:LanguageTool.Metadata:Use data and metadata as plural nouns.
       test.txt:29:1:LanguageTool.Metadata:Use data and metadata as plural nouns.
+
+  - name: spelling-split
+    about: with `split`, an identifier's parts are checked and a misspelled
+      part is reported at its own position; an acronym or a short part is not
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = error
+
+        [*.md]
+        BasedOnStyles = Ident
+      styles/Ident/Spelling.yml: |
+        extends: spelling
+        message: "'%s' is a typo."
+        level: error
+        split: true
+      test.md: |
+        Call recieveMessage, RecieveMessage, recieve_message, and getElementById.
+
+        The HTTPServer and the teh-thing and the v2 build are here.
+
+        See **recieveMessage** and _recieve_message_ in markup.
+    args: test.md
+    exit: 1
+    want: |
+      test.md:1:6:Ident.Spelling:'recieve' is a typo.
+      test.md:1:22:Ident.Spelling:'Recieve' is a typo.
+      test.md:1:38:Ident.Spelling:'recieve' is a typo.
+      test.md:3:24:Ident.Spelling:'teh' is a typo.
+      test.md:5:7:Ident.Spelling:'recieve' is a typo.
+      test.md:5:29:Ident.Spelling:'recieve' is a typo.

@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/mitchellh/mapstructure"
 	rx "github.com/vale-cli/vale/v3/internal/regex"
@@ -45,6 +46,11 @@ type Spelling struct {
 	gs           *spell.Checker
 	Custom       bool
 	Append       bool
+
+	// `split` (`bool`): Check the parts of an identifier -- `recieveMessage`,
+	// `recieve_message`, `RecieveMessage` -- rather than skipping it or
+	// checking it whole. A part is reported at its own position.
+	Split bool
 }
 
 func addFilters(s *Spelling, generic baseCheck, _ *core.Config) error {
@@ -218,7 +224,7 @@ OUTER:
 		// See https://github.com/errata-ai/vale/v2/issues/148.
 		word := s.gs.Convert(found)
 
-		if s.stdFilters && skippedByDefault(word) {
+		if s.stdFilters && s.skipped(word) {
 			continue
 		}
 		for _, filter := range s.Filters {
@@ -227,24 +233,77 @@ OUTER:
 			}
 		}
 
-		if !s.gs.Spell(word) && !isMatch(s.exceptRe, word) {
-			// The extent is the word as it appears, not as it converts: the
-			// offset is a position in the block's own text, so the length that
-			// goes with it has to be measured there too.
-			offset := offsets[i]
-			loc := []int{offset, offset + len(found)}
-
-			a := core.Alert{Check: s.Name, Severity: s.Level, Span: loc,
-				Link: s.Link, Match: word, Action: s.Action}
-
-			a.Message, a.Description = formatMessages(s.Message,
-				s.Description, word)
-
-			alerts = append(alerts, a)
+		if s.gs.Spell(word) || isMatch(s.exceptRe, word) {
+			continue
 		}
+
+		// The extent is the word as it appears, not as it converts: the
+		// offset is a position in the block's own text, so the length that
+		// goes with it has to be measured there too.
+		offset := offsets[i]
+		if s.Split {
+			// A plain word is reported whole; anything else is an identifier,
+			// and only its parts are.
+			if parts := splitIdentifier(found); len(parts) != 1 || parts[0].text != found {
+				for _, part := range parts {
+					if s.checkPart(part.text) {
+						continue
+					}
+					a := s.alert(part.text, offset+part.at, len(part.text))
+					// A part is not a whole word, so a search for it would
+					// land elsewhere; the block knows where it is. Where it
+					// does not, the whole identifier is reported instead.
+					if at := blk.SourceOffset(offset + part.at); at >= 0 {
+						a.Span = []int{at, at + len(part.text)}
+						a.HasByteOffsets = true
+					} else {
+						a.Match, a.Span = found, []int{offset, offset + len(found)}
+					}
+					alerts = append(alerts, a)
+				}
+				continue
+			}
+		}
+		alerts = append(alerts, s.alert(word, offset, len(found)))
 	}
 
 	return alerts, nil
+}
+
+// skipped reports whether the built-in filters skip a word. With `split`,
+// an identifier is not skipped but taken apart, so only a word with a
+// character no identifier holds is.
+func (s Spelling) skipped(word string) bool {
+	if s.Split {
+		return skipsNonIdentifier(word)
+	}
+	return skippedByDefault(word)
+}
+
+// checkPart reports whether one part of an identifier passes: a short part
+// or an acronym is not checked.
+func (s Spelling) checkPart(part string) bool {
+	letters := 0
+	for _, r := range part {
+		if unicode.IsLetter(r) {
+			letters++
+		}
+	}
+	if letters < minPartLetters || strings.ToUpper(part) == part {
+		return true
+	}
+	return s.gs.Spell(s.gs.Convert(part)) || isMatch(s.exceptRe, part)
+}
+
+// minPartLetters is the shortest part of an identifier that is checked.
+const minPartLetters = 3
+
+// alert reports a misspelling at a position in the block.
+func (s Spelling) alert(word string, at, length int) core.Alert {
+	a := core.Alert{Check: s.Name, Severity: s.Level, Span: []int{at, at + length},
+		Link: s.Link, Match: word, Action: s.Action}
+	a.Message, a.Description = formatMessages(s.Message, s.Description, word)
+	return a
 }
 
 // Fields provides access to the internal rule definition.
