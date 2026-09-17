@@ -261,3 +261,43 @@ cases:
     want: |
       test.md:1:35:T.Annotations:'TODO' left in text.
       test.md:9:18:T.Annotations:'TODO' left in text.
+
+  - name: rst-promoted-title-in-off-region
+    about: "#340 -- rst2html promotes a lone top-level section title to the
+      document title and emits it before the comments that precede it in
+      the source. The comment's position is searched for from the last
+      comment, not from the block cursor, so the region still begins at
+      the comment."
+    requires: rst2html
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.rst]
+        BasedOnStyles = T
+      styles/T/Words.yml: |
+        extends: substitution
+        message: "Use '%s' instead of '%s'."
+        level: error
+        swap:
+          text: words
+      test.rst: |
+        .. vale off
+
+        this text should be fine
+        ------------------------
+
+        .. vale on
+
+        This text should be flagged.
+
+        .. vale off
+
+        this text should be fine
+
+        .. vale on
+    args: --output=line --no-exit test.rst
+    exit: 0
+    want: |
+      test.rst:8:6:T.Words:Use 'words' instead of 'text'.

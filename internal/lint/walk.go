@@ -539,10 +539,10 @@ func (w *walker) commentAt(txt string) int {
 	if txt == "" {
 		return -1
 	}
-	if w.cmtCursor < w.cursor {
-		w.cmtCursor = w.cursor
-	}
 
+	// The search runs from the last comment, not from the block cursor: a
+	// converter may emit a block ahead of a comment written before it, as
+	// rst2html does with a promoted document title.
 	ctx := w.getCtx()
 	if w.cmtCursor > len(ctx) {
 		return -1

@@ -309,6 +309,10 @@ func (l *Linter) lintFile(src string) lintResult {
 		err = l.lintLines(file)
 	}
 
+	// A comment read after a block was linted still covers that block: a
+	// converter may emit a promoted title ahead of the comment above it.
+	file.DropDisabled()
+
 	if err == nil {
 		// Run all rules with `scope: raw`
 		//

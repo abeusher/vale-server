@@ -1439,6 +1439,34 @@ cases:
       test.md:9:3:Vale.Spelling:Did you really mean 'Namee'?
       test.md:13:3:Vale.Spelling:Did you really mean 'Namee'?
 
+  - name: term-before-autolink-with-later-link
+    about: "#1027 -- a term on an indented line that lazily continues into
+      an autolink, with a Markdown link to the same host later in the
+      file. The term was reported inside the later link's URL; it is
+      reported where it is written."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = en
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/en/accept.txt: |
+        GitHub
+      test.md: |
+        # Title
+
+         github:
+        <https://github.com/errata-ai/vale?tab=readme-ov-file>
+
+        [GitHub](https://github.com/errata-ai/vale?tab=readme-ov-file).
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:2:Vale.Terms:Use 'GitHub' instead of 'github'.
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html

@@ -637,6 +637,21 @@ type commentRegion struct {
 	open  bool
 }
 
+// DropDisabled removes the alerts that fall inside a comment region, for
+// the regions recorded after those alerts were added.
+func (f *File) DropDisabled() {
+	if len(f.regions) == 0 {
+		return
+	}
+	kept := f.Alerts[:0]
+	for _, a := range f.Alerts {
+		if !f.RegionDisabled(a.Check, a.Match, a.Line, a.Span[0]) {
+			kept = append(kept, a)
+		}
+	}
+	f.Alerts = kept
+}
+
 // UpdateComments sets a new status based on comment.
 func (f *File) UpdateComments(comment string) {
 	f.UpdateCommentsAt(comment, -1)
