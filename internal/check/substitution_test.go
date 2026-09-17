@@ -357,3 +357,42 @@ func TestOptions(t *testing.T) {
 		}
 	}
 }
+
+// A vocabulary term is plain text unless it uses a regex construct; a
+// period alone, as in Node.js, is text. As a pattern, its periods are
+// escaped and its spaces match a line wrap.
+func TestTermPattern(t *testing.T) {
+	cases := []struct {
+		term    string
+		literal bool
+		pattern string
+	}{
+		{"Kubernetes", true, "Kubernetes"},
+		{"Node.js runtime", true, `Node\.js\s+runtime`},
+		{"mea culpa", true, `mea\s+culpa`},
+		{"OAuth2?", false, "OAuth2?"},
+		{"[Pp]ython", false, "[Pp]ython"},
+		{`Docker(file|ize) image`, false, `Docker(file|ize)\s+image`},
+	}
+	for _, c := range cases {
+		if got := literalTerm(c.term); got != c.literal {
+			t.Errorf("literalTerm(%q) = %v, want %v", c.term, got, c.literal)
+		}
+		if got := termPattern(c.term); got != c.pattern {
+			t.Errorf("termPattern(%q) = %q, want %q", c.term, got, c.pattern)
+		}
+	}
+}
+
+// A fix to a wrapped phrase keeps the wrap.
+func TestKeepWrap(t *testing.T) {
+	if got := keepWrap("mea culpa", "Mea\nCulpa"); got != "mea\nculpa" {
+		t.Errorf("keepWrap = %q", got)
+	}
+	if got := keepWrap("mea culpa", "Mea Culpa"); got != "mea culpa" {
+		t.Errorf("keepWrap = %q", got)
+	}
+	if got := keepWrap("OAuth2", "oauth 2"); got != "OAuth2" {
+		t.Errorf("keepWrap with mismatched words = %q", got)
+	}
+}

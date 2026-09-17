@@ -59,6 +59,27 @@ func (v *sectionVocab) accepts(word, txt string, loc []int) bool {
 	return v != nil && (isMatch(v.exceptRe, word) || withinPhrase(v.phraseRe, txt, loc))
 }
 
+// wrapSpace is the whitespace a vocabulary term holds between its words.
+var wrapSpace = regexp.MustCompile(`[ \t]+`)
+
+// literalTerm reports whether a vocabulary term is plain text. A period
+// is allowed, since a name like Node.js holds one and never means "any
+// character".
+func literalTerm(term string) bool {
+	bare := strings.ReplaceAll(term, ".", "")
+	return regexp.QuoteMeta(bare) == bare
+}
+
+// termPattern returns a vocabulary term as a pattern: a literal term's
+// periods are escaped, and whitespace between words matches a line wrap
+// as well as a space.
+func termPattern(term string) string {
+	if literalTerm(term) {
+		term = strings.ReplaceAll(term, ".", `\.`)
+	}
+	return wrapSpace.ReplaceAllString(term, `\s+`)
+}
+
 // FilterEnv is the environment passed to the `--filter` flag.
 type FilterEnv struct {
 	Rules []Definition
@@ -460,9 +481,11 @@ func updateExceptions(previous []string, current []string, vocab bool) (*rx.Rege
 	// otherwise any instance of the `(?i)` flag will be set for the entire
 	// expression.
 	for i, term := range previous {
+		term = termPattern(term)
 		if !strings.HasPrefix(term, "(?i)") {
-			previous[i] = fmt.Sprintf("(?-i)%s", term)
+			term = "(?-i)" + term
 		}
+		previous[i] = term
 	}
 
 	regex := makeRegexp(
@@ -497,7 +520,7 @@ func buildPhraseRe(previous, current []string, vocab bool) *rx.Regexp {
 	phrases := []string{}
 	for _, term := range terms {
 		if strings.ContainsAny(term, " \t") || strings.Contains(term, `\s`) {
-			phrases = append(phrases, term)
+			phrases = append(phrases, termPattern(term))
 		}
 	}
 

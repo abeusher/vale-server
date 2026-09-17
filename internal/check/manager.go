@@ -540,7 +540,7 @@ func (mgr *Manager) addTerms(name string, terms []string) {
 	}
 	swap := make(map[string]string, len(terms))
 	for _, term := range terms {
-		swap[strings.ToLower(term)] = term
+		swap[termPattern(strings.ToLower(term))] = term
 	}
 	vocab := cloneRule(defaultRules["Terms"])
 	vocab["name"], vocab["swap"] = name, swap
@@ -548,6 +548,10 @@ func (mgr *Manager) addTerms(name string, terms []string) {
 		vocab["level"] = level
 	}
 	rule, _ := buildRule(mgr.Config, vocab)
+	if sub, ok := rule.(Substitution); ok {
+		sub.terms = true
+		rule = sub
+	}
 	mgr.rules[name] = rule
 }
 
@@ -557,8 +561,12 @@ func (mgr *Manager) addAvoid(name string, terms []string) {
 	if len(terms) == 0 {
 		return
 	}
+	tokens := make([]string, 0, len(terms))
+	for _, term := range terms {
+		tokens = append(tokens, termPattern(term))
+	}
 	avoid := cloneRule(defaultRules["Avoid"])
-	avoid["name"], avoid["tokens"] = name, append([]string(nil), terms...)
+	avoid["name"], avoid["tokens"] = name, tokens
 	if level, ok := mgr.Config.RuleToLevel[name]; ok {
 		avoid["level"] = level
 	}

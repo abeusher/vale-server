@@ -91,6 +91,7 @@ func addExceptions(s *Spelling, generic baseCheck, cfg *core.Config) error { //n
 		//
 		// The assumption is that, for spell checking, we don't want to
 		// flag words that are part of a larger word.
+		term = termPattern(term)
 		if !strings.HasPrefix(term, "\b") && !strings.HasSuffix(term, "\b") {
 			term = `\b` + term + `\b`
 		}

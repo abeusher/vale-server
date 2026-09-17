@@ -2,6 +2,7 @@ package check
 
 import (
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +28,11 @@ type Substitution struct {
 	Nonword    bool
 	Vocab      bool
 	Capitalize bool
+
+	// terms marks a rule built from a vocabulary, whose swap values may be
+	// patterns: a match is offered as a fix only when the expected form is
+	// plain text.
+	terms bool
 
 	msgMap []string
 
@@ -200,9 +206,13 @@ func (s Substitution) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core
 				// describes the acceptable forms (e.g. a vocab term `[pP]y.*\b`,
 				// or a `LookAround`-style pattern), which we still match as one.
 				var same bool
-				if s.Fields().Action.Name == "replace" {
+				switch {
+				case s.Fields().Action.Name == "replace":
 					same = core.StringInSlice(observed, getOptions(expected))
-				} else {
+				case s.terms:
+					// A phrase may wrap across a line where the term has a space.
+					same = matchToken(termPattern(expected), observed, false)
+				default:
 					same = matchToken(expected, observed, false)
 				}
 				if !same && !isMatch(s.exceptRe, observed) && !withinPhrase(s.phraseRe, txt, loc) &&
@@ -245,6 +255,9 @@ func (s Substitution) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core
 					a.Action = action
 					if action.Name == "replace" {
 						a.Suggestions = action.Params
+					} else if s.terms && expected != observed && literalTerm(expected) {
+						a.Action = core.Action{Name: "replace", Params: []string{keepWrap(expected, observed)}}
+						a.Suggestions = a.Action.Params
 					}
 
 					anchor(&a, blk)
@@ -428,13 +441,34 @@ func expansionsFor(term string) []string {
 // `OAuth2?` against `Oauth` yields `OAuth`. It returns term unchanged when no
 // spelling matches, so the raw regex is only ever a last resort. See #997.
 func recaseToTerm(term, observed string) string {
+	unwrapped := strings.Join(strings.Fields(observed), " ")
 	for _, candidate := range expansionsFor(term) {
-		if strings.EqualFold(candidate, observed) {
+		if strings.EqualFold(candidate, unwrapped) {
 			return candidate
 		}
 	}
 	return term
 }
+
+// keepWrap returns expected with the whitespace observed has between its
+// words, so a fix to a phrase that wraps across a line keeps the wrap.
+func keepWrap(expected, observed string) string {
+	words := strings.Fields(expected)
+	gaps := wrapGaps.FindAllString(observed, -1)
+	if len(gaps) != len(words)-1 {
+		return expected
+	}
+	var b strings.Builder
+	for i, w := range words {
+		if i > 0 {
+			b.WriteString(gaps[i-1])
+		}
+		b.WriteString(w)
+	}
+	return b.String()
+}
+
+var wrapGaps = regexp.MustCompile(`\s+`)
 
 func convertMessage(s string) string {
 	for _, spec := range []string{"'%s'", "\"%s\""} {

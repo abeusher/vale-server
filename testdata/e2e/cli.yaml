@@ -178,6 +178,254 @@ cases:
           "error": ""
       }
 
+  - name: json-terms-suggestions
+    about: "A Terms alert offers the vocabulary's spelling as a fix when it
+      is plain text, so an editor can apply it. A term written as a pattern
+      the match can't be re-cased to, like `[Pp]ython`, offers nothing
+      rather than the pattern itself."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/P/accept.txt: |
+        Kubernetes
+        [Pp]ython
+        OAuth2?
+      doc.md: |
+        We run kubernetes, PYTHON, and oauth2 here.
+    args: --output=JSON doc.md
+    exit: 1
+    want: |
+      {
+        "doc.md": [
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "Kubernetes"
+              ]
+            },
+            "Suggestions": [
+              "Kubernetes"
+            ],
+            "Span": [
+              8,
+              17
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'Kubernetes' instead of 'kubernetes'.",
+            "Severity": "error",
+            "Match": "kubernetes",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              20,
+              25
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use '[Pp]ython' instead of 'PYTHON'.",
+            "Severity": "error",
+            "Match": "PYTHON",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "OAuth2"
+              ]
+            },
+            "Suggestions": [
+              "OAuth2"
+            ],
+            "Span": [
+              32,
+              37
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'OAuth2' instead of 'oauth2'.",
+            "Severity": "error",
+            "Match": "oauth2",
+            "Line": 1
+          }
+        ]
+      }
+
+  - name: json-vocab-phrases
+    about: "A vocabulary phrase matches across a line wrap: a wrongly cased
+      one is reported, with a fix that keeps the wrap, and a correctly cased
+      one is not. A period in a term is text, so `Node.js runtime` does not
+      accept `nodexjs runtime`, and is offered as a fix."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+      styles/config/vocabularies/P/accept.txt: |
+        mea culpa
+        Node.js runtime
+        OAuth2?
+      styles/config/vocabularies/P/reject.txt: |
+        end user
+      doc4.md: |
+        Say Mea
+        Culpa here, and mea
+        culpa there.
+
+        The nodexjs runtime and the node.js runtime, oauth2 too.
+
+        For the end
+        user and the end user.
+    args: --output=JSON doc4.md
+    exit: 1
+    want: |
+      {
+        "doc4.md": [
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "mea\nculpa"
+              ]
+            },
+            "Suggestions": [
+              "mea\nculpa"
+            ],
+            "Span": [
+              5,
+              13
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'mea culpa' instead of 'Mea Culpa'.",
+            "Severity": "error",
+            "Match": "Mea\nCulpa",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "suggest",
+              "Params": [
+                "spellings"
+              ]
+            },
+            "Suggestions": [],
+            "Span": [
+              5,
+              11
+            ],
+            "Check": "Vale.Spelling",
+            "Description": "",
+            "Link": "",
+            "Message": "Did you really mean 'nodexjs'?",
+            "Severity": "error",
+            "Match": "nodexjs",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "Node.js runtime"
+              ]
+            },
+            "Suggestions": [
+              "Node.js runtime"
+            ],
+            "Span": [
+              29,
+              43
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'Node.js runtime' instead of 'node.js runtime'.",
+            "Severity": "error",
+            "Match": "node.js runtime",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "OAuth2"
+              ]
+            },
+            "Suggestions": [
+              "OAuth2"
+            ],
+            "Span": [
+              46,
+              51
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'OAuth2' instead of 'oauth2'.",
+            "Severity": "error",
+            "Match": "oauth2",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              9,
+              16
+            ],
+            "Check": "Vale.Avoid",
+            "Description": "",
+            "Link": "",
+            "Message": "Avoid using 'end user'.",
+            "Severity": "error",
+            "Match": "end\nuser",
+            "Line": 7
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              14,
+              21
+            ],
+            "Check": "Vale.Avoid",
+            "Description": "",
+            "Link": "",
+            "Message": "Avoid using 'end user'.",
+            "Severity": "error",
+            "Match": "end user",
+            "Line": 8
+          }
+        ]
+      }
+
   - name: json-suggestions
     about: "JSON output carries what an action resolves to, so a consumer
       reads the answer rather than re-running the recipe; an alert without an
