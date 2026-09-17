@@ -28,10 +28,30 @@ func (l *Linter) lintDITA(file *core.File) error {
 		return core.NewE201FromPosition(err.Error(), file.Path, 1)
 	}
 
+	// The toolkit reads the file from disk, so ignore patterns are applied
+	// to a copy beside it, where its conrefs still resolve.
+	input := file.Path
+	if s, terr := l.Transform(file); terr != nil {
+		return terr
+	} else if s != file.Content {
+		copied, cerr := os.CreateTemp(filepath.Dir(file.Path), ".vale-*.dita")
+		if cerr != nil {
+			return core.NewE100(file.Path, cerr)
+		}
+		defer os.Remove(copied.Name())
+		if _, cerr = copied.WriteString(s); cerr != nil {
+			return core.NewE100(file.Path, cerr)
+		}
+		if cerr = copied.Close(); cerr != nil {
+			return core.NewE100(file.Path, cerr)
+		}
+		input = copied.Name()
+	}
+
 	// FIXME: The `dita` command is *slow* (~4s per file)!
 	cmd := exec.Command(dita, []string{
 		"-i",
-		file.Path,
+		input,
 		"-f",
 		"html5",
 		"-o",
@@ -50,7 +70,7 @@ func (l *Linter) lintDITA(file *core.File) error {
 		return core.NewE100(file.Path, err)
 	}
 
-	targetFileName := strings.TrimSuffix(filepath.Base(file.Path), filepath.Ext(file.Path)) + ".html"
+	targetFileName := strings.TrimSuffix(filepath.Base(input), filepath.Ext(input)) + ".html"
 	_ = filepath.WalkDir(tempDir, func(fp string, de os.DirEntry, _ error) error {
 		// Find .html file, also looking in subdirectories in case an
 		// "outer" file was referenced in the DITA file, which is allowed

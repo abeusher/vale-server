@@ -1467,6 +1467,41 @@ cases:
     want: |
       test.md:3:2:Vale.Terms:Use 'GitHub' instead of 'github'.
 
+  - name: dita-token-ignores
+    about: "#407 -- ignore patterns apply to DITA. The toolkit reads its
+      input from disk, so the patterns are applied to a copy written
+      beside the source, where its references still resolve."
+    requires: dita
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        TokenIgnores = (\[.+\])
+
+        [*.dita]
+        BasedOnStyles = T
+      styles/T/Rain.yml: |
+        extends: existence
+        message: "found '%s'"
+        level: error
+        tokens:
+          - rains
+      test.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="t1">
+          <title>Weather</title>
+          <body>
+            <p>[if it rains, i will not go] but it rains anyway.</p>
+          </body>
+        </topic>
+    args: --output=line --no-exit test.dita
+    exit: 0
+    want: |
+      test.dita:6:44:T.Rain:found 'rains'
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html

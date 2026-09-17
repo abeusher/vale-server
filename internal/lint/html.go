@@ -57,6 +57,7 @@ func (e extensionConfig) match(sec glob.Glob) bool {
 // element the others are converted to.
 var blockDelimiters = map[string]string{
 	".adoc": "\n----\n$1\n----\n",
+	".dita": "<codeblock>$1</codeblock>",
 	".html": "<pre>$1</pre>",
 	".md":   "\n```\n$1\n```\n",
 	".mdx":  "\n```\n$1\n```\n",
@@ -114,6 +115,7 @@ func applyBlockPatterns(c *core.Config, exts extensionConfig, content string) (s
 
 var inlineDelimiters = map[string]string{
 	".adoc": "`$1`",
+	".dita": "<codeph>$1</codeph>",
 	".html": "<code>$1</code>",
 	".md":   "`$1`",
 	".mdx":  "`$1`",
