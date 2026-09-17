@@ -1312,6 +1312,133 @@ cases:
       top.mdx:9:7:Vale.Spelling:Did you really mean 'firstt'?
       top.mdx:10:7:Vale.Spelling:Did you really mean 'secondd'?
 
+  - name: mdx/one-line-elements
+    about: "A JSX element that opens and closes on one line with text
+      between its tags is a paragraph holding an inline element, as MDX
+      reads it, so a callout's text is prose. Without text it stays code."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        <Tip>Thiss suggests a helpful tip</Tip>
+
+        <Badge color="orange">Deprecatedd</Badge> since the lastt release.
+
+        <video src="introo.mp4"></video>
+
+        <Chart data={populationn} />
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:1:6:Vale.Spelling:Did you really mean 'Thiss'?
+      test.mdx:3:23:Vale.Spelling:Did you really mean 'Deprecatedd'?
+      test.mdx:3:53:Vale.Spelling:Did you really mean 'lastt'?
+
+  - name: mdx/located-past-markup
+    about: "An alert is placed by searching the source for its text, and the
+      search skips JSX tags, expressions, ESM, and fenced code. A heading
+      that repeats its element's attribute lands on the heading, a table
+      header repeated after a fence is reported each time, and a heading
+      with a custom-id expression is reported where it is."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        <Update label="x" rss={{ title:"Notificationn preferences" }}>
+
+          ## Notificationn preferences
+
+        </Update>
+
+        | Namee | Type |
+        | --- | --- |
+        | `a` | one |
+
+        ```mdx-code-block
+        <APITable>
+        ```
+
+        | Namee | Type |
+        | --- | --- |
+        | `b` | two |
+
+        ## i18n {/* #i18n */}
+
+        Set the localee here.
+
+        ## Localee {/* #localee */}
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:3:6:Vale.Spelling:Did you really mean 'Notificationn'?
+      test.mdx:7:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.mdx:15:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.mdx:21:9:Vale.Spelling:Did you really mean 'localee'?
+      test.mdx:23:4:Vale.Spelling:Did you really mean 'Localee'?
+
+  - name: repeated-match-after-substring
+    about: "A reported match is masked where it was found. It used to be
+      masked at its first occurrence, which could sit inside another word;
+      the match itself then stayed findable, the next alert with the same
+      text landed on it, and one of the two was dropped as a duplicate."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        Subtitles are fine.
+
+        Say titl here.
+
+        Say titl again.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:5:Vale.Spelling:Did you really mean 'titl'?
+      test.md:5:5:Vale.Spelling:Did you really mean 'titl'?
+
+  - name: repeated-header-after-code-cell
+    about: "A table cell holding only inline code reaches the walker as a
+      run of mask characters. It is not searched for; it used to be found in
+      a masked info string further down, which moved the cursor past the
+      next table, whose header was then placed at a later copy of itself."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        | Namee | Type |
+        | --- | --- |
+        | `defaultMode` | one |
+
+        ```js title="docusaurus.config.js"
+        x
+        ```
+
+        | Namee | Type |
+        | --- | --- |
+        | `id` | two |
+
+        | Namee | Type |
+        | --- | --- |
+        | `x` | three |
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.md:9:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.md:13:3:Vale.Spelling:Did you really mean 'Namee'?
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html

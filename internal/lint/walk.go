@@ -461,6 +461,14 @@ func (w *walker) block(text, scope string, shift int) nlp.Block {
 	return b
 }
 
+// isMask reports whether text is nothing but mask characters, as the text
+// of a skipped inline element is. Such a block is nowhere in the source,
+// and searching for it lands on whatever the source has masked the same
+// way -- an info string -- dragging the cursor past real text.
+func isMask(text string) bool {
+	return text != "" && strings.Trim(text, "*@ \t\n") == ""
+}
+
 // runs returns the recorded runs covering [shift, shift+n) of the walker's
 // buffer, rebased onto a block that starts there.
 func (w *walker) runs(shift, n int) []nlp.Run {
@@ -482,7 +490,7 @@ func (w *walker) runs(shift, n int) []nlp.Run {
 // it every alert has to be placed by searching the document and masking what
 // it matched, which costs a copy of the document per alert.
 func (w *walker) locate(text string) int {
-	if text == "" {
+	if text == "" || isMask(text) {
 		return -1
 	}
 
@@ -634,6 +642,9 @@ func (w *walker) replaceToks(tok html.Token) {
 // `testdata/e2e/frontmatter.yaml` out of a literal block and onto the prose it
 // belongs to. What still comes through here is a block no run could place.
 func (w *walker) advance(text string) int {
+	if isMask(text) {
+		return -1
+	}
 	last := text
 	if i := strings.LastIndexByte(text, '\n'); i >= 0 {
 		last = text[i+1:]

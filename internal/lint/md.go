@@ -8,6 +8,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	grh "github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
 
 	"github.com/vale-cli/vale/v3/internal/core"
 	"github.com/vale-cli/vale/v3/internal/nlp"
@@ -55,10 +56,20 @@ func (l *Linter) lintMarkdownWith(f *core.File, md goldmark.Markdown) error {
 		return err
 	}
 
-	if err = md.Convert([]byte(s), &buf); err != nil {
+	src := []byte(s)
+	doc := md.Parser().Parse(text.NewReader(src))
+	if err = md.Renderer().Render(&buf, src, doc); err != nil {
 		return core.NewE100(f.Path, err)
 	}
 
+	if md == goldMdx {
+		// The transform rewrites the front matter, so the spans of the
+		// parsed text are not the file's; the file is parsed again for them.
+		if s != f.Content {
+			doc = md.Parser().Parse(text.NewReader([]byte(f.Content)))
+		}
+		f.Content = maskSpans(f.Content, mdxTagMasks(doc))
+	}
 	f.Content = prepMarkdown(f.Content)
 	return l.lintHTMLTokens(f, buf.Bytes(), 0)
 }

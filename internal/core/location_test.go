@@ -17,7 +17,7 @@ func TestInitialPositionPunctAnchor(t *testing.T) {
 	ctx := "Test, line.\nLine, with, four, commas, `yes`.\n"
 	txt := "Line, with, four, commas, yes."
 
-	pos, sub := initialPosition(ctx, txt, Alert{Match: ","}, -1)
+	pos, sub := initialPosition(ctx, txt, Alert{Match: ","})
 	// The comma belongs to the second sentence (after "Line"), not the first
 	// comma in "Test,". Position is 1-based rune count.
 	if pos != 17 {
@@ -73,7 +73,7 @@ func TestInitialPositionSkipsCodeSpan(t *testing.T) {
 	ctx := "Inline `sum(x) # ZQX` and text ZQX after."
 	txt := "Inline ************ and text ZQX after."
 
-	pos, _ := initialPosition(ctx, txt, Alert{Match: "ZQX"}, -1)
+	pos, _ := initialPosition(ctx, txt, Alert{Match: "ZQX"})
 	if pos != 32 {
 		t.Errorf("pos = %d, want 32 (the prose occurrence)", pos)
 	}
@@ -89,7 +89,7 @@ func TestInitialPositionSkipsPriorOccurrences(t *testing.T) {
 
 	for skip, want := range map[int]int{0: 5, 1: 13, 2: 23} {
 		a := Alert{Match: "and", Span: []int{0, 0}, skipOcc: skip}
-		if pos, _ := initialPosition(ctx, "unfindable block text", a, -1); pos != want {
+		if pos, _ := initialPosition(ctx, "unfindable block text", a); pos != want {
 			t.Errorf("skip %d: pos = %d, want %d", skip, pos, want)
 		}
 	}
@@ -150,7 +150,7 @@ func TestInitialPositionSmartApostrophe(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			pos, sub := initialPosition(tt.ctx, tt.ctx, Alert{Match: "toolkit's"}, -1)
+			pos, sub := initialPosition(tt.ctx, tt.ctx, Alert{Match: "toolkit's"})
 			if pos != 5 {
 				t.Errorf("pos = %d, want 5", pos)
 			}
@@ -345,5 +345,24 @@ func TestByteLocAcrossContexts(t *testing.T) {
 	f.byteLoc("aaaa", 3, 4, 0)
 	if _, span := f.byteLoc("éééé", 4, 6, 0); span[0] != 3 {
 		t.Fatalf("got column %d, want 3", span[0])
+	}
+}
+
+// A block the walker placed is located where it was placed, even when the
+// same text occurs earlier; and the match is masked where it was found,
+// not at its first occurrence as a substring of another word.
+func TestLocateMatchTrustsPlacement(t *testing.T) {
+	ctx := "| Name |\n\n| Name |\n"
+	pos, _, hit := locateMatch(ctx, "Name", Alert{Match: "Name", Span: []int{0, 4}}, 12)
+	if pos != 13 || hit != 12 {
+		t.Errorf("got pos %d hit %d, want 13 and 12", pos, hit)
+	}
+
+	got := maskMatch("Subtitles.\nSay titl.\n", "titl", 15)
+	if got != "Subtitles.\nSay ####.\n" {
+		t.Errorf("maskMatch = %q", got)
+	}
+	if fallback := maskMatch("Say titl.\n", "titl", -1); fallback != "Say ####.\n" {
+		t.Errorf("maskMatch fallback = %q", fallback)
 	}
 }

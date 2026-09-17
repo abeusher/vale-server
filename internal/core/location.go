@@ -243,12 +243,28 @@ func directPosition(ctx string, idx, from int, sub string) bool {
 	return !strings.Contains(ctx[from:idx], sub)
 }
 
-// positionOf converts a match offset into the 1-based rune position reported.
-func positionOf(ctx string, idx int, sub string) (int, string) {
+// located is positionOf with the match's byte index in the unmasked context.
+func located(ctx string, idx int, sub string, shift int) (int, string, int) {
 	if strings.HasPrefix(ctx[idx:], "_") {
-		idx++ // We don't want to include the underscore boundary.
+		idx++
 	}
-	return nlp.StrLen(ctx[:idx]) + 1, sub
+	return nlp.StrLen(ctx[:idx]) + 1, sub, idx + shift
+}
+
+// maskMatch masks the match at hit in ctx, rune for rune, or its first
+// occurrence when hit is not where it was found.
+func maskMatch(ctx, match string, hit int) string {
+	end := hit + len(match)
+	if hit < 0 || end > len(ctx) || ctx[hit:end] != match {
+		masked, _ := Substitute(ctx, match, '#')
+		return masked
+	}
+	return ctx[:hit] + strings.Map(func(r rune) rune {
+		if r != '\n' {
+			return '#'
+		}
+		return r
+	}, match) + ctx[end:]
 }
 
 // initialPosition calculates the position of a match (given by the location in
@@ -256,14 +272,21 @@ func positionOf(ctx string, idx int, sub string) (int, string) {
 //
 // `at` is where `txt` begins in `ctx` if the caller knows, and -1 otherwise. It
 // is only a shortcut: the position it produces is checked before being used.
-func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
+func initialPosition(ctx, txt string, a Alert) (int, string) {
+	pos, sub, _ := locateMatch(ctx, txt, a, -1)
+	return pos, sub
+}
+
+// locateMatch is initialPosition with the byte index of the match in ctx,
+// or -1 when the position was guessed rather than found.
+func locateMatch(ctx, txt string, a Alert, at int) (int, string, int) {
 	var idx int
 	var pat *regexp.Regexp
 
 	if a.Match == "" {
 		// We have nothing to look for -- assume the rule applies to the entire
 		// document (e.g., readability).
-		return 1, ""
+		return 1, "", -1
 	}
 
 	offset := strings.Index(ctx, txt)
@@ -278,12 +301,21 @@ func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
 			offset = strings.Index(ctx, fields[0])
 		}
 	}
+	// The walker placed the block; trust that over an earlier copy of its
+	// text, which is what a repeated table header or heading is.
+	if at >= 0 && at <= len(ctx) && strings.HasPrefix(ctx[at:], txt) {
+		offset = at
+	}
+
+	// The prefix mask below maps rune to rune, so a prefix holding anything
+	// multi-byte comes back shorter; shift maps an index in the masked text
+	// back to ctx as given.
+	shift := 0
 	if offset >= 0 {
 		masked, _ := Substitute(ctx, ctx[:offset], '@')
-		// Substitute maps rune to rune, so a prefix holding anything multi-byte
-		// comes back shorter. The tail it leaves alone is what gives the block
-		// its new position.
+		// The tail it leaves alone is what gives the block its new position.
 		offset = len(masked) - (len(ctx) - offset)
+		shift = len(ctx) - len(masked)
 		ctx = masked
 	}
 
@@ -313,7 +345,7 @@ func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
 				fs[1]++
 			}
 			if !insideInlineMarkup(ctx, fs) {
-				return positionOf(ctx, pos, sub)
+				return located(ctx, pos, sub, shift)
 			}
 		}
 	}
@@ -334,13 +366,13 @@ func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
 	// found without running the engine over the whole context.
 	if !strings.ContainsAny(sub, `'"`) {
 		if lit := literalNth(ctx, sub, skip); lit >= 0 {
-			return positionOf(ctx, lit, sub)
+			return located(ctx, lit, sub, shift)
 		}
 	}
 
 	fsi := pat.FindAllStringIndex(ctx, 1)
 	if len(fsi) > 0 && skip == 0 && !insideInlineMarkup(ctx, fsi[0]) {
-		return positionOf(ctx, fsi[0][0], sub)
+		return located(ctx, fsi[0][0], sub, shift)
 	}
 	if len(fsi) > 0 {
 		fsi = pat.FindAllStringIndex(ctx, -1)
@@ -350,7 +382,8 @@ func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
 		if idx < 0 {
 			// This should only happen if we're in a scope that contains inline
 			// markup (e.g., a sentence with code spans).
-			return guessLocation(ctx, txt, sub)
+			p, g := guessLocation(ctx, txt, sub)
+			return p, g, -1
 		}
 	} else {
 		idx = fsi[0][0]
@@ -376,11 +409,7 @@ func initialPosition(ctx, txt string, a Alert, at int) (int, string) {
 		}
 	}
 
-	if strings.HasPrefix(ctx[idx:], "_") {
-		idx++ // We don't want to include the underscore boundary.
-	}
-
-	return nlp.StrLen(ctx[:idx]) + 1, sub
+	return located(ctx, idx, sub, shift)
 }
 
 func guessLocation(ctx, sub, match string) (int, string) {

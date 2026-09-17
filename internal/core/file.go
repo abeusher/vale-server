@@ -350,18 +350,23 @@ func addTextMetrics(params map[string]interface{}, doc *summarize.Document) {
 //
 // `at` is where `s` begins in `ctx`, or -1 when that is not known; it lets the
 // match be placed without searching for it.
-func (f *File) FindLoc(ctx, s string, pad, count int, a Alert, at int) (int, []int) {
+func (f *File) FindLoc(ctx, s string, pad, count int, a Alert, at int) (int, []int, int) {
 	var length int
 	var lines []string
 
+	given := len(ctx)
 	for _, s := range a.Offset {
 		ctx, _ = Substitute(ctx, s, '@')
 	}
 
-	pos, substring := initialPosition(ctx, s, a, at)
+	pos, substring, hit := locateMatch(ctx, s, a, at)
 	if pos < 0 {
 		// Shouldn't happen ...
-		return pos, []int{0, 0}
+		return pos, []int{0, 0}, -1
+	}
+	if hit >= 0 {
+		// The Offset masks above map rune to rune; the tail keeps its place.
+		hit += given - len(ctx)
 	}
 
 	loc := a.Span
@@ -383,12 +388,12 @@ func (f *File) FindLoc(ctx, s string, pad, count int, a Alert, at int) (int, []i
 			} else if loc[1] <= 0 {
 				loc[1] = 1
 			}
-			return count - (len(lines) - (idx + 1)), loc
+			return count - (len(lines) - (idx + 1)), loc, hit
 		}
 		counter += length
 	}
 
-	return count, loc
+	return count, loc, hit
 }
 
 func (f *File) assignLoc(ctx string, blk nlp.Block, pad int, a Alert) (int, []int) {
@@ -416,7 +421,7 @@ func (f *File) assignLoc(ctx string, blk nlp.Block, pad int, a Alert) (int, []in
 			}
 			// No offset hint: `masked` is a single line, so the block's own
 			// offset is measured against something else entirely.
-			pos, substring := initialPosition(masked, blk.Text, a, -1)
+			pos, substring := initialPosition(masked, blk.Text, a)
 
 			loc[0] = pos + pad
 			loc[1] = pos + nlp.StrLen(substring) - 1
@@ -526,6 +531,7 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 	//
 	// We use blk.Context (the original document) rather than ctx, which may
 	// have been modified by ChkToCtx substitutions from earlier alerts.
+	hit := -1 // where the match was found in ctx, for the mask below
 	switch {
 	case a.HasByteOffsets && a.Span[0] >= 0 && a.Span[1] <= len(blk.Context):
 		// Before the measurement case: a zero-width match has no text either,
@@ -578,7 +584,7 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 			a.Line, a.Span = f.assignLoc(ctx, blk, pad, a)
 		}
 		if (!lookup && a.Span[0] < 0) || lookup {
-			a.Line, a.Span = f.FindLoc(ctx, blk.Text, pad, lines, a, blk.Offset)
+			a.Line, a.Span, hit = f.FindLoc(ctx, blk.Text, pad, lines, a, blk.Offset)
 		}
 	}
 
@@ -597,7 +603,7 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 		// and skipping it avoids copying the whole context per alert, which
 		// dominated Vale's allocations.
 		if !a.HasByteOffsets {
-			f.ChkToCtx[a.Check], _ = Substitute(ctx, a.Match, '#')
+			f.ChkToCtx[a.Check] = maskMatch(ctx, a.Match, hit)
 			if f.chkMasked != nil {
 				f.chkMasked[a.Check+"\x00"+a.Match]++
 			}

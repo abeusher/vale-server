@@ -584,6 +584,10 @@ type mdxJsxContainer struct {
 	// count against JSX quoted in a code fence.
 	depth  int
 	fenced bool
+
+	// spans are the source ranges of the element's own tags, which hold
+	// no prose.
+	spans [][2]int
 }
 
 var kindMdxJsxContainer = ast.NewNodeKind("MdxJsxContainer")
@@ -672,24 +676,58 @@ func (*mdxJsxFlowParser) Open(_ ast.Node, reader text.Reader, pc parser.Context)
 
 	if end < 0 {
 		// The open tag itself spans lines.
+		_, seg := reader.Position()
 		node := &mdxJsxContainer{pending: true}
 		node.jsx.scan(line[pos:])
 		node.raw.Write(line[pos:])
+		node.spans = append(node.spans, [2]int{seg.Start + pos, seg.Stop})
 		mdxAdvanceLine(reader, line)
 		return node, parser.HasChildren
 	}
 
 	if s.done || mdxDoneOnLine(s, line[pos+end:]) {
-		// The whole element sits on this line: keep it as code, the shape
-		// mdx2vast gave it.
+		if mdxHasText(line[pos+end:]) {
+			// Text beside the tags: MDX reads the line as a paragraph
+			// holding an inline element, so its text is prose.
+			return nil, parser.NoChildren
+		}
+		// The whole element sits on this line with nothing to lint.
 		node := &mdxBlock{typ: "mdxJsxFlowElement", finished: true}
 		mdxConsume(node, reader)
 		return node, parser.NoChildren
 	}
 
+	_, seg := reader.Position()
 	node := &mdxJsxContainer{name: s.stack[len(s.stack)-1]}
+	node.spans = append(node.spans, [2]int{seg.Start + pos, seg.Start + pos + end})
 	reader.Advance(pos + end)
 	return node, parser.HasChildren
+}
+
+// mdxHasText reports whether rest holds text outside its tags and
+// expressions.
+func mdxHasText(rest []byte) bool {
+	for i := 0; i < len(rest); {
+		switch {
+		case rest[i] == '<':
+			end := mdxTagEnd(rest[i:], &mdxJsxScan{})
+			if end < 0 {
+				return false
+			}
+			i += end
+		case rest[i] == '{':
+			n := (&mdxScan{}).scanExpr(rest[i:])
+			if n < 0 {
+				return false
+			}
+			i += n
+		case !util.IsSpace(rest[i]):
+			return true
+		default:
+			i++
+		}
+	}
+	return false
 }
 
 // mdxDoneOnLine reports whether the element completes in the rest of its
@@ -712,13 +750,14 @@ func (*mdxJsxFlowParser) Continue(node ast.Node, reader text.Reader, _ parser.Co
 		return parser.Close
 	}
 
-	line, _ := reader.PeekLine()
+	line, seg := reader.PeekLine()
 
 	if n.pending {
 		end := mdxTagEnd(line, &n.jsx)
 		if end < 0 {
 			n.jsx.scan(line)
 			n.raw.Write(line)
+			n.spans = append(n.spans, [2]int{seg.Start, seg.Stop})
 			mdxAdvanceLine(reader, line)
 			return parser.Continue | parser.HasChildren
 		}
@@ -726,11 +765,13 @@ func (*mdxJsxFlowParser) Continue(node ast.Node, reader text.Reader, _ parser.Co
 			// Childless after all: a multiline self-closing element.
 			n.raw.Write(bytes.TrimRight(line, "\n"))
 			n.rawOnly = true
+			n.spans = append(n.spans, [2]int{seg.Start, seg.Stop})
 			mdxAdvanceLine(reader, line)
 			return parser.Close
 		}
 		n.pending = false
 		n.name = n.jsx.stack[len(n.jsx.stack)-1]
+		n.spans = append(n.spans, [2]int{seg.Start, seg.Start + end})
 		reader.Advance(end)
 		return parser.Continue | parser.HasChildren
 	}
@@ -742,6 +783,7 @@ func (*mdxJsxFlowParser) Continue(node ast.Node, reader text.Reader, _ parser.Co
 	} else if !n.fenced {
 		if mdxIsCloseTag(trimmed, n.name) {
 			if n.depth == 0 {
+				n.spans = append(n.spans, [2]int{seg.Start, seg.Stop})
 				mdxAdvanceLine(reader, line)
 				return parser.Close
 			}
@@ -771,6 +813,8 @@ type mdxInline struct {
 
 	form int    // 0 code, 1 an open tag, 2 a close tag
 	name string // the tag's name, for form 1
+
+	span [2]int // the source range of the tag or expression
 }
 
 var kindMdxInline = ast.NewNodeKind("MdxInline")
@@ -833,13 +877,18 @@ func mdxParseInline(block text.Reader, typ string, newJsx func() *mdxJsxScan) as
 			}
 			collected = append(collected, line[:end]...)
 			block.Advance(end)
-			return mdxInlineTag(collected, jsx)
+			node := mdxInlineTag(collected, jsx)
+			_, at := block.Position()
+			node.span = [2]int{pos.Start, at.Start}
+			return node
 		}
 
 		if used := js.scanExpr(line); used >= 0 {
 			collected = append(collected, line[:used]...)
 			block.Advance(used)
-			return &mdxInline{typ: typ, text: bytes.TrimRight(collected, "\n")}
+			_, at := block.Position()
+			return &mdxInline{typ: typ, text: bytes.TrimRight(collected, "\n"),
+				span: [2]int{pos.Start, at.Start}}
 		}
 
 		collected = append(collected, line...)
@@ -850,7 +899,7 @@ func mdxParseInline(block text.Reader, typ string, newJsx func() *mdxJsxScan) as
 // mdxInlineTag builds the node for one completed inline tag: an open tag is
 // a span whose children follow as prose, a close tag ends one, and a
 // self-closing element stays a code span.
-func mdxInlineTag(collected []byte, jsx *mdxJsxScan) ast.Node {
+func mdxInlineTag(collected []byte, jsx *mdxJsxScan) *mdxInline {
 	node := &mdxInline{typ: "mdxJsxTextElement", text: bytes.TrimRight(collected, "\n")}
 
 	switch {
@@ -962,6 +1011,45 @@ func renderMdxInline(w util.BufWriter, _ []byte, node ast.Node, entering bool) (
 		_, _ = w.WriteString("</code>")
 	}
 	return ast.WalkContinue, nil
+}
+
+// mdxTagMasks returns the source ranges of the JSX tags in doc. An alert
+// is placed by searching the source for its text, and a tag is the one
+// piece of source the walker never sees, so its attributes are still there
+// to be found unless they are blanked.
+func mdxTagMasks(doc ast.Node) [][2]int {
+	var spans [][2]int
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch n := n.(type) {
+		case *mdxJsxContainer:
+			spans = append(spans, n.spans...)
+		case *mdxInline:
+			if n.form != 0 && n.span[1] > n.span[0] {
+				spans = append(spans, n.span)
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return spans
+}
+
+// maskSpans blanks the spans of content, byte for byte, keeping newlines.
+func maskSpans(content string, spans [][2]int) string {
+	if len(spans) == 0 {
+		return content
+	}
+	b := []byte(content)
+	for _, s := range spans {
+		for i := max(s[0], 0); i < s[1] && i < len(b); i++ {
+			if b[i] != '\n' {
+				b[i] = ' '
+			}
+		}
+	}
+	return string(b)
 }
 
 // lintMDX lints MDX: Markdown, parsed with the MDX constructs.
