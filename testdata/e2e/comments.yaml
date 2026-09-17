@@ -134,3 +134,57 @@ cases:
       test.md:3:36:Vale.Spelling:Did you really mean 'commentt'?
       test.md:5:7:Vale.Spelling:Did you really mean 'thirdd'?
       test.md:7:7:Vale.Spelling:Did you really mean 'fourthh'?
+
+  - name: mdx-repeated-text-in-off-region
+    about: "#1032 -- the same paragraph repeated inside a vale-off region
+      and inside code fences. A block's later matches used to be located
+      in the next copy of its text, since the earlier matches had been
+      masked out of the block, which put them outside the region."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+
+        {/* vale off */}
+
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+
+        {/* vale on */}
+
+        {/* vale off */}
+        ```
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+
+        {/* vale off */}
+        ```shell
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+
+        {/* vale off */}
+        ```shell {2,4} mark="determine"
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:2:1:Vale.Spelling:Did you really mean 'iptables'?
+      test.mdx:2:44:Vale.Spelling:Did you really mean 'iptables'?
+      test.mdx:3:9:Vale.Spelling:Did you really mean 'iptables'?

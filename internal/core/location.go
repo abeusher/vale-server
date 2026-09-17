@@ -243,6 +243,20 @@ func directPosition(ctx string, idx, from int, sub string) bool {
 	return !strings.Contains(ctx[from:idx], sub)
 }
 
+// throughMask reports whether ctx begins with txt, a masked byte in ctx
+// standing for any byte of txt.
+func throughMask(ctx, txt string) bool {
+	if len(ctx) < len(txt) {
+		return false
+	}
+	for i := 0; i < len(txt); i++ {
+		if c := ctx[i]; c != txt[i] && c != '#' && c != '@' {
+			return false
+		}
+	}
+	return true
+}
+
 // located is positionOf with the match's byte index in the unmasked context.
 func located(ctx string, idx int, sub string, shift int) (int, string, int) {
 	if strings.HasPrefix(ctx[idx:], "_") {
@@ -302,8 +316,10 @@ func locateMatch(ctx, txt string, a Alert, at int) (int, string, int) {
 		}
 	}
 	// The walker placed the block; trust that over an earlier copy of its
-	// text, which is what a repeated table header or heading is.
-	if at >= 0 && at <= len(ctx) && strings.HasPrefix(ctx[at:], txt) {
+	// text, which is what a repeated table header or heading is. Earlier
+	// alerts have masked their matches in the block, so the text is read
+	// through the mask.
+	if at >= 0 && at <= len(ctx) && throughMask(ctx[at:], txt) {
 		offset = at
 	}
 

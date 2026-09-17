@@ -366,3 +366,14 @@ func TestLocateMatchTrustsPlacement(t *testing.T) {
 		t.Errorf("maskMatch fallback = %q", fallback)
 	}
 }
+
+// A block's later matches are located in that block, not in a later copy
+// of its text, although the earlier matches have been masked out of it.
+func TestLocateMatchThroughMask(t *testing.T) {
+	ctx := "######## here and iptables again.\n\niptables here and iptables again.\n"
+	txt := "iptables here and iptables again."
+	pos, _, hit := locateMatch(ctx, txt, Alert{Match: "iptables", Span: []int{18, 26}, skipOcc: 1}, 0)
+	if pos != 19 || hit != 18 {
+		t.Errorf("got pos %d hit %d, want 19 and 18", pos, hit)
+	}
+}
