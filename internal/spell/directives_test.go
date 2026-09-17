@@ -141,3 +141,16 @@ ami/A
 		"ami": true, "l'Ami": true, "l'Aami": false,
 	})
 }
+
+// A word from an ignore list is suggested, ahead of a dictionary word it
+// ties with.
+func TestSuggestPrefersListedWords(t *testing.T) {
+	gs := speller(t, "SET UTF-8\n", "2\nkubeful\nother\n")
+	if _, err := gs.addWordList(strings.NewReader("kubectl\n")); err != nil {
+		t.Fatal(err)
+	}
+	got := gs.suggest("kubctl")
+	if len(got) == 0 || got[0].word != "kubectl" {
+		t.Errorf("suggest(kubctl) = %v, want kubectl first", got)
+	}
+}

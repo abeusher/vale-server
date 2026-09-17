@@ -20,6 +20,8 @@ import (
 type wordMatch struct {
 	word  string
 	score float64
+
+	listed bool // from an ignore list rather than the dictionary
 }
 
 // goSpell checks words against one dictionary. The dictionary is shared by
@@ -215,7 +217,7 @@ func (s *goSpell) suggest(word string) []wordMatch {
 		}
 		seen[w] = struct{}{}
 		// Earlier is better; the score keeps that order across checkers.
-		hits = append(hits, wordMatch{w, 1 - float64(len(hits))/1e6})
+		hits = append(hits, wordMatch{word: w, score: 1 - float64(len(hits))/1e6})
 	}
 
 	// The word in another case, then the dictionary's own spelling of it,
@@ -262,7 +264,15 @@ func (s *goSpell) suggest(word string) []wordMatch {
 	roots := []wordMatch{}
 	for _, option := range s.keys() {
 		sim := strutil.Similarity(option, lower, metric)
-		roots = append(roots, wordMatch{option, sim})
+		roots = append(roots, wordMatch{word: option, score: sim})
+	}
+
+	// A word from an ignore list is the project's own, and comes first
+	// among candidates it ties with.
+	listed := []wordMatch{}
+	for option := range s.listed {
+		sim := strutil.Similarity(s.lowerWord(option), lower, metric)
+		listed = append(listed, wordMatch{word: option, score: sim, listed: true})
 	}
 	sort.Slice(roots, func(i, j int) bool {
 		if roots[i].score != roots[j].score {
@@ -285,13 +295,17 @@ func (s *goSpell) suggest(word string) []wordMatch {
 				}
 				formSeen[f.Word] = struct{}{}
 				sim := strutil.Similarity(f.Word, lower, metric)
-				matches = append(matches, wordMatch{f.Word, sim})
+				matches = append(matches, wordMatch{word: f.Word, score: sim})
 			}
 		}
 	}
+	matches = append(matches, listed...)
 	sort.Slice(matches, func(i, j int) bool {
 		if matches[i].score != matches[j].score {
 			return matches[i].score > matches[j].score
+		}
+		if matches[i].listed != matches[j].listed {
+			return matches[i].listed
 		}
 		return matches[i].word < matches[j].word
 	})
@@ -313,7 +327,7 @@ func (s *goSpell) suggest(word string) []wordMatch {
 			continue
 		}
 		seen[w] = struct{}{}
-		hits = append(hits, wordMatch{w, m.score})
+		hits = append(hits, wordMatch{word: w, score: m.score, listed: m.listed})
 	}
 	return hits
 }

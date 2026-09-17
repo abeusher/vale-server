@@ -136,6 +136,48 @@ cases:
           "error": ""
       }
 
+  - name: fix-spelling-from-vocabulary
+    about: "A spelling suggestion draws on the project's vocabularies as
+      well as the dictionary: an accepted term as close as any dictionary
+      word comes first, spelled as the vocabulary spells it."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = Proj
+
+        [*.md]
+        BasedOnStyles = Vale
+      styles/config/vocabularies/Proj/accept.txt: |
+        Kubernetes
+        kubectl
+      alert.json: |
+        {
+          "Action": {"Name": "suggest", "Params": ["spellings"]},
+          "Span": [5, 11],
+          "Check": "Vale.Spelling",
+          "Description": "",
+          "Link": "",
+          "Message": "Did you really mean 'kubctl'?",
+          "Severity": "error",
+          "Match": "kubctl",
+          "Line": 1
+        }
+    args: fix alert.json
+    exit: 0
+    want: |
+      {
+          "suggestions": [
+              "kubectl",
+              "cubical",
+              "cubital",
+              "Dubcek",
+              "Jubal",
+              "btl"
+          ],
+          "error": ""
+      }
+
   - name: json-suggestions
     about: "JSON output carries what an action resolves to, so a consumer
       reads the answer rather than re-running the recipe; an alert without an

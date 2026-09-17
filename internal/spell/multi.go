@@ -9,6 +9,9 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/adrg/strutil"
+	"github.com/adrg/strutil/metrics"
+
 	"github.com/vale-cli/vale/v3/internal/system"
 )
 
@@ -184,24 +187,46 @@ func (m *Checker) Spell(word string) bool {
 
 // Suggest returns a list of suggestions for a given word.
 func (m *Checker) Suggest(word string) []string {
+	suggestions := []string{}
+	for _, r := range m.Rank(word) {
+		suggestions = append(suggestions, r.Word)
+	}
+	return suggestions
+}
+
+// A Suggestion is a candidate spelling and how close it is to the word, on
+// the scale Similarity uses.
+type Suggestion struct {
+	Word  string
+	Score float64
+}
+
+// Rank returns the closest spellings of word across the dictionaries, best
+// first, at most six.
+func (m *Checker) Rank(word string) []Suggestion {
 	ranks := []wordMatch{}
 	for _, checker := range m.checkers {
 		ranks = append(ranks, checker.suggest(word)...)
 	}
 
-	sort.Slice(ranks, func(i, j int) bool {
+	sort.SliceStable(ranks, func(i, j int) bool {
 		return ranks[i].score > ranks[j].score
 	})
 
-	suggestions := []string{}
+	suggestions := []Suggestion{}
 	for i, r := range ranks {
 		if i > 5 {
 			break
 		}
-		suggestions = append(suggestions, r.word)
+		suggestions = append(suggestions, Suggestion{r.word, r.score})
 	}
-
 	return suggestions
+}
+
+// Similarity is the closeness of two spellings, from 0 to 1, as the
+// suggester measures it.
+func Similarity(a, b string) float64 {
+	return strutil.Similarity(a, b, metrics.NewLevenshtein())
 }
 
 // Dict returns the underlying dictionary for the provided index.

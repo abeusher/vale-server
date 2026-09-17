@@ -280,7 +280,7 @@ func spelling(alert core.Alert, cfg *core.Config) ([]string, error) {
 		return suggestions, fmt.Errorf("unknown check '%s'", alert.Check)
 	}
 
-	return rule.Suggest(alert.Match), nil
+	return rule.SuggestFor(alert.Match, cfg), nil
 }
 
 func replace(alert core.Alert, _ *core.Config) ([]string, error) {

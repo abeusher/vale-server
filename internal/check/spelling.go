@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
 	"unicode"
 
@@ -317,9 +318,68 @@ func (s Spelling) Pattern() string {
 	return ""
 }
 
-// Pattern is the internal regex pattern used by this rule.
+// Suggest returns the closest spellings of word from the dictionaries.
 func (s Spelling) Suggest(word string) []string {
-	return s.gs.Suggest(word)
+	return s.SuggestFor(word, nil)
+}
+
+// SuggestFor is Suggest with the project's vocabularies as candidates too:
+// an accepted term as close as a dictionary word is suggested first, in
+// the case the vocabulary spells it.
+func (s Spelling) SuggestFor(word string, cfg *core.Config) []string {
+	ranked := s.gs.Rank(word)
+	if cfg == nil {
+		return suggestionWords(ranked)
+	}
+
+	lower := strings.ToLower(word)
+	floor := 0.0
+	if len(ranked) > 0 {
+		floor = ranked[len(ranked)-1].Score
+	}
+
+	terms := append([]string(nil), cfg.AcceptedTokens...)
+	for _, v := range cfg.Vocabularies {
+		if v != nil {
+			terms = append(terms, v.Accepted...)
+		}
+	}
+	merged := make([]spell.Suggestion, 0, len(terms)+len(ranked))
+	for _, term := range terms {
+		if strings.EqualFold(term, word) {
+			continue
+		}
+		if score := spell.Similarity(strings.ToLower(term), lower); score >= floor && score > 0 {
+			merged = append(merged, spell.Suggestion{Word: term, Score: score})
+		}
+	}
+
+	// Stable, so a vocabulary term keeps its place ahead of a dictionary
+	// word it ties with, or repeats.
+	merged = append(merged, ranked...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Score > merged[j].Score
+	})
+	out := make([]string, 0, 6)
+	seen := map[string]bool{}
+	for _, m := range merged {
+		if seen[m.Word] {
+			continue
+		}
+		seen[m.Word] = true
+		if out = append(out, m.Word); len(out) == 6 {
+			break
+		}
+	}
+	return out
+}
+
+func suggestionWords(ranked []spell.Suggestion) []string {
+	out := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		out = append(out, r.Word)
+	}
+	return out
 }
 
 func makeSpeller(s *Spelling, cfg *core.Config, rulePath string) (*spell.Checker, error) {

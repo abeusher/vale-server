@@ -364,3 +364,37 @@ func TestNestedEditParamsFlatten(t *testing.T) {
 		t.Errorf("params = %v, want %v", got, want)
 	}
 }
+
+// A vocabulary term as close as any dictionary word is suggested first, as
+// the vocabulary spells it.
+func TestSuggestForPrefersVocabulary(t *testing.T) {
+	bare, sp := managerWithStyles(t, map[string]string{
+		"T/Spelling.yml": "extends: spelling\nmessage: \"'%s'?\"\nlevel: error\n",
+	})
+	mgr, err := NewManager(bare.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = mgr.AddRuleFromFile("T.Spelling", filepath.Join(sp, "T", "Spelling.yml")); err != nil {
+		t.Fatal(err)
+	}
+	rule := mgr.Rules()["T.Spelling"].(Spelling)
+
+	plain := rule.SuggestFor("kubctl", nil)
+	if len(plain) > 0 && plain[0] == "kubectl" {
+		t.Fatal("the dictionary knows kubectl; the test proves nothing")
+	}
+
+	mgr.Config.AcceptedTokens = []string{"kubectl"}
+	got := rule.SuggestFor("kubctl", mgr.Config)
+	if len(got) == 0 || got[0] != "kubectl" {
+		t.Errorf("SuggestFor = %v, want kubectl first", got)
+	}
+	for i, w := range got {
+		for _, later := range got[i+1:] {
+			if w == later {
+				t.Errorf("SuggestFor repeats %q: %v", w, got)
+			}
+		}
+	}
+}
