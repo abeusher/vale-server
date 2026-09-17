@@ -213,3 +213,79 @@ func TestSyncAgainInstallsIntoStylesPath(t *testing.T) {
 		t.Fatalf("pipeline file not refreshed:\n%s", installed)
 	}
 }
+
+// syncZipPkg syncs the given zip fixture into a fresh StylesPath and returns
+// that path.
+func syncZipPkg(t *testing.T, zipName string) string {
+	t.Helper()
+
+	root := t.TempDir()
+	stylesPath := filepath.Join(root, "styles")
+
+	pkg, err := filepath.Abs(filepath.Join(TestData, zipName))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cfgPath := filepath.Join(root, ".vale.ini")
+	if err = os.WriteFile(cfgPath,
+		[]byte("StylesPath = styles\nPackages = "+pkg+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err = sync(nil, &core.CLIFlags{Path: cfgPath, IgnoreGlobal: true}); err != nil {
+		t.Fatalf("sync failed for %s: %v", zipName, err)
+	}
+
+	return stylesPath
+}
+
+// installedNames lists the entries in dir by their exact on-disk names, so
+// that a case-insensitive filesystem cannot hide a wrongly cased install.
+func installedNames(t *testing.T, dir string) []string {
+	t.Helper()
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		names = append(names, entry.Name())
+	}
+	return names
+}
+
+func TestSyncZipTopLevelDirCaseDiffersStyleOnly(t *testing.T) {
+	// casefold.zip holds `CaseFold/Rule.yml`; the package is named after the
+	// file, `casefold`. See #1181.
+	stylesPath := syncZipPkg(t, "casefold.zip")
+
+	names := installedNames(t, stylesPath)
+	if len(names) != 1 || names[0] != "CaseFold" {
+		t.Fatalf("expected the style to be installed as 'CaseFold', got %v", names)
+	}
+
+	rule := filepath.Join(stylesPath, "CaseFold", "Rule.yml")
+	if !system.FileExists(rule) {
+		t.Fatalf("expected installed rule: %s", rule)
+	}
+}
+
+func TestSyncZipTopLevelDirCaseDiffersPackage(t *testing.T) {
+	// casefold-pkg.zip holds `Casefold-Pkg/styles/CaseFoldStyle` and a
+	// `.vale.ini`; the package is named after the file, `casefold-pkg`.
+	stylesPath := syncZipPkg(t, "casefold-pkg.zip")
+
+	rule := filepath.Join(stylesPath, "CaseFoldStyle", "Rule.yml")
+	if !system.FileExists(rule) {
+		t.Fatalf("expected installed rule: %s", rule)
+	}
+
+	pipe := filepath.Join(stylesPath, core.PipeDir)
+	names := installedNames(t, pipe)
+	if len(names) != 1 || names[0] != "0-Casefold-Pkg.ini" {
+		t.Fatalf("expected the package config as '0-Casefold-Pkg.ini', got %v", names)
+	}
+}
