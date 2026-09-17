@@ -34,6 +34,11 @@ type Linter struct {
 	// A hooked run takes the serial path, which is the one that can time a rule.
 	RuleHook func(name string, took time.Duration)
 
+	// ditaHTML holds what the DITA toolkit made of each DITA file in the
+	// run, by absolute path, from one conversion of them all. See
+	// prepareDITA.
+	ditaHTML map[string][]byte
+
 	// adoc holds the Asciidoctor processes this run is using, and adocOnce
 	// starts them the first time an AsciiDoc file is seen.
 	//
@@ -159,6 +164,9 @@ func (l *Linter) Lint(input []string, pat string) ([]*core.File, error) {
 	// Whatever external processes this run starts, it also stops. Lint may be
 	// called again on the same Linter, so the next run starts its own.
 	defer l.stopExternal()
+
+	l.prepareDITA(input)
+	defer func() { l.ditaHTML = nil }()
 
 	for _, src := range input {
 		filesChan, errChan := l.lintFiles(done, src)

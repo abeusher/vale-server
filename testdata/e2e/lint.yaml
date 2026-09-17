@@ -1502,6 +1502,52 @@ cases:
     want: |
       test.dita:6:44:T.Rain:found 'rains'
 
+  - name: dita-many-files
+    about: "Every DITA file of a run is converted in one toolkit run, through
+      a map written in their common directory, since starting the toolkit
+      costs more than converting a file. A nested topic and one an ignore
+      pattern changes are converted the same way."
+    requires: dita
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        TokenIgnores = (\[.+\])
+
+        [*.dita]
+        BasedOnStyles = T
+      styles/T/Rain.yml: |
+        extends: existence
+        message: "found '%s'"
+        level: error
+        tokens:
+          - rains
+      docs/a.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="a">
+          <title>A</title>
+          <body>
+            <p>It rains in A.</p>
+          </body>
+        </topic>
+      docs/sub/b.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="b">
+          <title>B</title>
+          <body>
+            <p>[if it rains] then it rains in B.</p>
+          </body>
+        </topic>
+    args: --output=line --no-exit docs
+    exit: 0
+    want: |
+      docs/a.dita:6:11:T.Rain:found 'rains'
+      docs/sub/b.dita:6:30:T.Rain:found 'rains'
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html
