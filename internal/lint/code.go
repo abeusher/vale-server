@@ -71,7 +71,7 @@ func (l *Linter) lintCode(f *core.File) error {
 		if l.skipsComment(comment.Scope) {
 			continue
 		}
-		f.SetText(comment.Text)
+		f.SetText(maskURLs(comment.Text))
 
 		err = l.lintLines(f)
 		if err != nil {
@@ -92,6 +92,16 @@ func (l *Linter) lintCode(f *core.File) error {
 // lintCodeOld lints source code by analyzing its comments.
 //
 // Deprecated: we now use tree-sitter to parse code and collect comments.
+// urlRE matches a URL in a comment, up to the punctuation that would
+// close a sentence or a bracket around it.
+var urlRE = regexp.MustCompile(`\b(?:https?|ftp)://[^\s<>"'` + "`" + `)\]]*[^\s<>"'` + "`" + `)\].,;:!?]`)
+
+// maskURLs blanks the URLs in a comment: a URL is never prose, and in
+// markup the converter keeps one out of the text already.
+func maskURLs(s string) string {
+	return urlRE.ReplaceAllStringFunc(s, nlp.BlankRunes)
+}
+
 func (l *Linter) lintCodeOld(f *core.File) error {
 	var line, match, txt string
 	var lnLength, padding int
@@ -129,6 +139,7 @@ func (l *Linter) lintCodeOld(f *core.File) error {
 				block.WriteString(line)
 				txt = block.String()
 
+				txt = maskURLs(txt)
 				b := nlp.NewBlock(
 					txt, txt, fmt.Sprintf(scope, "text.comment.block"))
 				if !(skipAll || skipBlock) {
@@ -148,6 +159,7 @@ func (l *Linter) lintCodeOld(f *core.File) error {
 			// 'print("foo") # ...' will be condensed to '# ...'.
 			padding = lnLength - len(match)
 
+			match = maskURLs(match)
 			b := nlp.NewBlock(
 				match, match, fmt.Sprintf(scope, "text.comment.line"))
 			if !(skipAll || skipInline) {

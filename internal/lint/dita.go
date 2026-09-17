@@ -61,6 +61,8 @@ func (l *Linter) lintDITA(file *core.File) error {
 		"html5",
 		"-o",
 		tempDir,
+		"-t",
+		filepath.Join(tempDir, "temp"), // this run's own, so two runs never share one
 		"--nav-toc=none",
 		"--outer.control=quiet", // allows DITA files to reference external files, like in conrefs.
 	}...)
@@ -183,7 +185,7 @@ func (l *Linter) prepareDITA(input []string) {
 	}
 
 	cmd := exec.Command(dita, "-i", mapFile.Name(), "-f", "html5", "-o", outDir,
-		"--nav-toc=none", "--outer.control=quiet")
+		"-t", filepath.Join(outDir, "temp"), "--nav-toc=none", "--outer.control=quiet")
 	if err = cmd.Run(); err != nil {
 		return
 	}

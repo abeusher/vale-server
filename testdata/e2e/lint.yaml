@@ -1548,6 +1548,60 @@ cases:
       docs/a.dita:6:11:T.Rain:found 'rains'
       docs/sub/b.dita:6:30:T.Rain:found 'rains'
 
+  - name: url-in-code-comment
+    about: "A URL is never prose. In a code comment it is blanked before
+      the comment is linted, as a converter already keeps one out of the
+      text of a markup file."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale, T
+      styles/T/Any.yml: |
+        extends: existence
+        message: "saw '%s'"
+        level: error
+        tokens:
+          - foobarbaz
+      doc.go: |
+        package x
+
+        // See https://example.com/foobarbaz-qux for detials.
+        var x = 1
+    args: --output=line --no-exit doc.go
+    exit: 0
+    want: |
+      doc.go:3:46:Vale.Spelling:Did you really mean 'detials'?
+
+  - name: rst-url-and-link-text
+    about: "A reStructuredText link's text is linted where it is written,
+      and a bare URL is not linted at all. A spelling alert is placed by
+      the block's own position, so a word in link text is no longer found
+      inside the URL that follows it."
+    requires: rst2html
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale, T
+      styles/T/Any.yml: |
+        extends: existence
+        message: "saw '%s'"
+        level: error
+        tokens:
+          - foobarbaz
+      doc.rst: |
+        See `foobarbaz text <https://example.com/foobarbaz-qux>`_ and https://example.com/foobarbaz-qux here.
+    args: --output=line --no-exit doc.rst
+    exit: 0
+    want: |
+      doc.rst:1:6:T.Any:saw 'foobarbaz'
+      doc.rst:1:6:Vale.Spelling:Did you really mean 'foobarbaz'?
+
   - name: restructuredtext
     args: test.rst
     requires: rst2html

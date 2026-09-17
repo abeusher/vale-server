@@ -108,6 +108,12 @@ func inlineIn(scope string, scopes []string) bool {
 	return false
 }
 
+// BlankRunes is s with every rune replaced by a space of the same width
+// in bytes, so that neither byte nor rune positions after it move.
+func BlankRunes(s string) string {
+	return string(blankRunes(s))
+}
+
 // blankRunes is s with every rune replaced by a space of the same width
 // in bytes, so that neither byte nor rune positions after it move.
 func blankRunes(s string) []byte {

@@ -267,7 +267,14 @@ OUTER:
 				continue
 			}
 		}
-		alerts = append(alerts, s.alert(word, offset, len(found)))
+		a := s.alert(word, offset, len(found))
+		// The block knows where it is, so the word need not be searched
+		// for, which found an earlier copy of it or one in markup.
+		if at := blk.SourceOffset(offset); at >= 0 {
+			a.Span = []int{at, at + len(found)}
+			a.HasByteOffsets = true
+		}
+		alerts = append(alerts, a)
 	}
 
 	return alerts, nil

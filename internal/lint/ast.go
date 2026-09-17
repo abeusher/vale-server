@@ -153,7 +153,10 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 				// FIXME: See https://github.com/errata-ai/vale/issues/421
 				txt = "code"
 			}
-			inline = core.StringInSlice(txt, inlineTags)
+			// A void element mid-sentence, `<source>` or `<wbr>`, separates
+			// the words around it as an inline one does; without this the
+			// text on either side fused, `The <source> is` as `Theis`.
+			inline = core.StringInSlice(txt, inlineTags) || core.StringInSlice(txt, voidTags)
 			// An inline element named in SkippedScopes is masked like an
 			// ignored one, rather than dropped: `where <code>x</code> is`
 			// must not read as `where is` (#1173), nor `in <code/> for` as
