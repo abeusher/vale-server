@@ -113,3 +113,24 @@ func TestScopeMatches(t *testing.T) {
 		})
 	}
 }
+
+// A negated inline scope is recorded so a rule can leave that element's
+// text out, and the rule still runs on the block that holds the element.
+func TestScopeExcluded(t *testing.T) {
+	s := NewScope([]string{"~heading & ~link"})
+	if len(s.Excluded) != 1 || s.Excluded[0] != "link" {
+		t.Errorf("Excluded = %v, want [link]", s.Excluded)
+	}
+	if !s.Matches(nlp.Block{Scope: "text.md"}) {
+		t.Error("~heading & ~link should reach a paragraph")
+	}
+	if s.Matches(nlp.Block{Scope: "text.heading.h2.md"}) {
+		t.Error("~heading & ~link should not reach a heading")
+	}
+	if s.Matches(nlp.Block{Scope: "link.md"}) {
+		t.Error("~heading & ~link should not reach a link fragment")
+	}
+	if got := NewScope([]string{"~heading"}).Excluded; len(got) != 0 {
+		t.Errorf("~heading excludes no inline scope, got %v", got)
+	}
+}

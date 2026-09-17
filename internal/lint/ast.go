@@ -164,7 +164,7 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 			if scope, ok := wanted[txt]; ok {
 				// A skipped element's text is masked out of the block, so its
 				// capture has to read the text as it arrived instead.
-				open = append(open, inlineCapture{tag: txt, scope: scope, masked: skip})
+				open = append(open, inlineCapture{tag: txt, scope: scope, masked: skip, begin: buf.Len()})
 			}
 			walker.addTag(txt, class, getAttribute(tok, markAttr))
 		} else if tokt == html.EndTagToken && core.StringInSlice(txt, inlineTags) {
@@ -175,9 +175,13 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 				done := open[n-1]
 				open = open[:n-1]
 				if body := strings.TrimSpace(done.text); body != "" {
+					// The run in the buffer, less the padding clean added
+					// around the element's text.
+					written := buf.String()[done.begin:]
+					begin := done.begin + (len(written) - len(strings.TrimLeft(written, " \n")))
 					walker.inline = append(walker.inline, inlineCapture{
-						tag: done.tag, scope: done.scope,
-						masked: done.masked, text: body})
+						tag: done.tag, scope: done.scope, masked: done.masked,
+						text: body, begin: begin, end: done.begin + len(strings.TrimRight(written, " \n"))})
 				}
 			}
 		} else if tokt == html.SelfClosingTagToken && core.StringInSlice(txt, inlineTags) {
@@ -359,6 +363,7 @@ func (l *Linter) lintScope(f *core.File, state *walker, txt string) error {
 			shift -= len(txt)
 
 			b := state.block(txt, withClasses(scope, state)+f.MetaScope+f.RealExt, shift)
+			b.Inline = inlineRuns(state.inline, b.Text, shift)
 			state.gather(txt, b.Line, metric)
 
 			// Prose, not just a block: a list item or a heading is made of
@@ -394,6 +399,7 @@ func (l *Linter) lintScope(f *core.File, state *walker, txt string) error {
 	f.Metrics["paragraphs"]++
 
 	b := state.block(txt, withClasses("text", state)+f.MetaScope+f.RealExt, 0)
+	b.Inline = inlineRuns(state.inline, b.Text, 0)
 	state.gather(txt, b.Line, "paragraphs")
 	if err := l.lintProse(f, b, state.lines, true); err != nil {
 		return err
@@ -440,6 +446,24 @@ func (l *Linter) lintInline(f *core.File, state *walker, blk nlp.Block, lines, s
 	}
 
 	return nil
+}
+
+// inlineRuns places each inline element captured in the block within its
+// text, shift being what was trimmed from the buffer's front. A masked
+// element's text is not in the block to place.
+func inlineRuns(caps []inlineCapture, text string, shift int) []nlp.Inline {
+	var runs []nlp.Inline
+	for _, cap := range caps {
+		if cap.masked || cap.text == "" {
+			continue
+		}
+		begin, end := cap.begin-shift, cap.end-shift
+		if begin < 0 || end > len(text) || text[begin:end] != cap.text {
+			continue
+		}
+		runs = append(runs, nlp.Inline{Scope: cap.scope, Begin: begin, End: end})
+	}
+	return runs
 }
 
 // seek finds text in s at or after from, returning where it begins and where

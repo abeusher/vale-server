@@ -57,7 +57,14 @@ type Selector struct {
 
 type Scope struct {
 	Selectors map[string][]Selector
+
+	// Excluded names the inline scopes the rule negates, such as `link`:
+	// the text of those elements is left out of the blocks the rule runs on.
+	Excluded []string
 }
+
+// inlineScopes are the scopes an inline element carries on its own.
+var inlineScopes = map[string]bool{"link": true, "strong": true, "emphasis": true, "code": true}
 
 func NewSelector(value []string) Selector {
 	negated := false
@@ -101,6 +108,13 @@ func NewScope(value []string) Scope {
 	}
 
 	built := Scope{Selectors: scope}
+	for _, selectors := range scope {
+		for _, part := range selectors {
+			if part.Negated && len(part.Value) == 1 && inlineScopes[part.Value[0]] {
+				built.Excluded = append(built.Excluded, part.Value[0])
+			}
+		}
+	}
 	scopeCache.Store(key, built)
 
 	return built
@@ -145,13 +159,19 @@ func (s Scope) partMatches(target, parent Selector, options []Selector) bool {
 	for _, part := range options {
 		tm := target.Contains(part)
 		pm := parent.Contains(part)
-		if part.Negated && !pm {
-			if target.Has("raw") || target.Has("summary") || target.Has("doc") {
-				// This can't apply to sized scopes, nor to a selection, whose
-				// text is linted where it lies.
+		if !part.Negated {
+			if !tm {
 				return false
 			}
-		} else if (!part.Negated && !tm) || (part.Negated && pm) {
+			continue
+		}
+		// A negated part excludes the element and whatever is inside it.
+		if tm || pm {
+			return false
+		}
+		if target.Has("raw") || target.Has("summary") || target.Has("doc") {
+			// This can't apply to sized scopes, nor to a selection, whose
+			// text is linted where it lies.
 			return false
 		}
 	}

@@ -399,12 +399,20 @@ func (mgr *Manager) compileCheck(file []byte, chkName, path string) (Rule, bool,
 // does. Reading the whole chain as one name left HasScope false, splitting
 // off, and the rule silently matching nothing. See #1133.
 //
-// A negated term asks for a family's absence, which needs nothing built.
+// A negated term asks for a family's absence, which needs nothing built,
+// except for an inline element: leaving `~link` out of a block needs the
+// links captured.
 func scopeBases(s string) []string {
 	bases := []string{}
 	for _, part := range splitOutside(s, '&') {
 		part = strings.TrimSpace(part)
-		if strings.HasPrefix(part, "~") || strings.HasPrefix(part, "doc(") {
+		if strings.HasPrefix(part, "doc(") {
+			continue
+		}
+		if negated := strings.HasPrefix(part, "~"); negated {
+			if base := strings.TrimPrefix(part, "~"); inlineScopes[base] {
+				bases = append(bases, base)
+			}
 			continue
 		}
 		bases = append(bases, strings.Split(part, ".")[0])

@@ -458,7 +458,7 @@ func (l *Linter) lintBlock(f *core.File, blk nlp.Block, lines, pad int, lookup b
 		if !wanted[i] || found[i] != nil {
 			continue
 		}
-		alerts, err := r.rule.Run(blk, f, l.Manager.Config)
+		alerts, err := r.rule.Run(blockFor(blk, r.rule), f, l.Manager.Config)
 		if err != nil {
 			return err
 		}
@@ -511,7 +511,7 @@ func (l *Linter) lintBlockSerial(f *core.File, blk nlp.Block, rules []scopedRule
 		if l.RuleHook != nil {
 			start = time.Now()
 		}
-		alerts, err := chk.Run(blk, f, l.Manager.Config)
+		alerts, err := chk.Run(blockFor(blk, chk), f, l.Manager.Config)
 		if l.RuleHook != nil {
 			l.RuleHook(name, time.Since(start))
 		}
@@ -552,7 +552,7 @@ func (l *Linter) runConcurrently(f *core.File, blk nlp.Block, rules []scopedRule
 			blockWorkers <- struct{}{}
 			defer func() { <-blockWorkers }()
 
-			alerts, err := rules[i].rule.Run(blk, f, l.Manager.Config)
+			alerts, err := rules[i].rule.Run(blockFor(blk, rules[i].rule), f, l.Manager.Config)
 			if alerts == nil {
 				alerts = []core.Alert{}
 			}
@@ -597,6 +597,19 @@ func lookupUnless(settings, unset map[string]bool, rule, style string) (bool, bo
 // Built once per distinct block scope and reused. Everything else shouldRun
 // weighs -- in-text comments, the file's own settings, the minimum level --
 // varies per file and is still decided there.
+// blockFor is blk as the rule sees it: with the text of any inline element
+// the rule's scope negates blanked out.
+func blockFor(blk nlp.Block, chk check.Rule) nlp.Block {
+	if len(blk.Inline) == 0 {
+		return blk
+	}
+	excluded := check.NewScope(chk.Fields().Scope).Excluded
+	if len(excluded) == 0 {
+		return blk
+	}
+	return blk.Without(excluded)
+}
+
 func (l *Linter) inScopeFor(blk nlp.Block) []scopedRule {
 	key := blk.Scope + "\x00" + blk.Parent
 	if l.inScope != nil {

@@ -26,6 +26,10 @@ type inlineCapture struct {
 	// element (inline code) is written out of it, so the fragment has to be
 	// located in the source rather than within the block.
 	masked bool
+
+	// begin and end are where the element's text sits in the block's
+	// buffer, recorded as it was written.
+	begin, end int
 }
 
 type walker struct {

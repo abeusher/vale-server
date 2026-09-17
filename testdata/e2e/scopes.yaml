@@ -409,3 +409,36 @@ cases:
       example.py:1:7:Vale.Spelling:Did you really mean 'folowing'?
     absent:
       - raduis
+
+  - name: negated-inline
+    about: "A rule whose scope negates an inline element, `~link`, runs on
+      the block but never sees that element's text, so a casing rule can
+      leave headings and link text, which follow title case, alone."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = T
+      styles/T/Caps.yml: |
+        extends: substitution
+        message: "Use '%s' for '%s'."
+        level: error
+        ignorecase: true
+        scope: ~heading & ~link
+        swap:
+          foo bar: Foo Bar
+      test.md: |
+        # Heading With foo bar
+
+        Plain foo bar here and [link foo bar](https://x.y) and more foo bar.
+
+        - Item foo bar and [foo bar](https://x.y) and *bold foo bar*.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:7:T.Caps:Use 'Foo Bar' for 'foo bar'.
+      test.md:3:61:T.Caps:Use 'Foo Bar' for 'foo bar'.
+      test.md:5:8:T.Caps:Use 'Foo Bar' for 'foo bar'.
+      test.md:5:53:T.Caps:Use 'Foo Bar' for 'foo bar'.

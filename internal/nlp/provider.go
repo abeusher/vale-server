@@ -3,6 +3,7 @@ package nlp
 import (
 	"strings"
 	"sync"
+	"unicode/utf8"
 
 	"github.com/jdkato/prose/v3/summarize"
 )
@@ -49,11 +50,81 @@ type Block struct {
 	// and each was placed as it was read. See #502.
 	Runs []Run
 
+	// Inline is where the inline elements Text holds begin and end, by the
+	// scope each carries, such as `link`, so a rule can leave one out.
+	Inline []Inline
+
 	// runes converts positions in Text from runes to bytes; see ByteSpan.
 	runes *runeIndex
 
 	// summary is the block's document statistics, shared by its copies.
 	summary *summaryCache
+}
+
+// An Inline is a run of a block's Text that an inline element holds.
+type Inline struct {
+	Scope      string
+	Begin, End int
+}
+
+// withInline carries over the parent's inline runs that fall inside the
+// piece of its text starting at start.
+func (b Block) withInline(parent []Inline, start int) Block {
+	for _, in := range parent {
+		if in.Begin >= start && in.End <= start+len(b.Text) {
+			b.Inline = append(b.Inline, Inline{in.Scope, in.Begin - start, in.End - start})
+		}
+	}
+	return b
+}
+
+// Without returns the block with the text of the inline elements carrying
+// any of the scopes blanked, rune for rune, so positions still hold.
+func (b Block) Without(scopes []string) Block {
+	text := []byte(b.Text)
+	changed := false
+	for _, in := range b.Inline {
+		if !inlineIn(in.Scope, scopes) || in.End > len(text) {
+			continue
+		}
+		changed = true
+		copy(text[in.Begin:in.End], blankRunes(b.Text[in.Begin:in.End]))
+	}
+	if !changed {
+		return b
+	}
+	b.Text = string(text)
+	b.Lower = strings.ToLower(b.Text)
+	b.runes = nil
+	return b
+}
+
+func inlineIn(scope string, scopes []string) bool {
+	for _, s := range scopes {
+		if s == scope {
+			return true
+		}
+	}
+	return false
+}
+
+// blankRunes is s with every rune replaced by a space of the same width
+// in bytes, so that neither byte nor rune positions after it move.
+func blankRunes(s string) []byte {
+	var out []byte
+	for _, r := range s {
+		switch utf8.RuneLen(r) {
+		case 1:
+			out = append(out, ' ')
+		case 2:
+			out = append(out, "\u00a0"...)
+		case 3:
+			out = append(out, "\u3000"...)
+		default:
+			out = append(out, "\U000e0020"...)
+		}
+	}
+	return out
 }
 
 // summaryCache builds a block's summarize.Document once.
@@ -266,7 +337,7 @@ func (n *Info) doNLP(blk *Block, seg segmenter, split bool) ([]Block, error) {
 		for _, p := range strings.SplitAfter(blk.Text, "\n\n") {
 			b := NewLinedBlock(ctx, p, "paragraph."+blk.Scope, idx)
 			start, off := offsetOf(blk, base, p, &cursor)
-			blks = append(blks, b.at(off).withRuns(blk.Runs, start))
+			blks = append(blks, b.at(off).withRuns(blk.Runs, start).withInline(blk.Inline, start))
 		}
 	}
 
@@ -279,14 +350,14 @@ func (n *Info) doNLP(blk *Block, seg segmenter, split bool) ([]Block, error) {
 			}
 			b := NewLinedBlock(ctx, s, "sentence."+blk.Scope, idx)
 			start, off := offsetOf(blk, base, s, &cursor)
-			blks = append(blks, b.at(off).withRuns(blk.Runs, start))
+			blks = append(blks, b.at(off).withRuns(blk.Runs, start).withInline(blk.Inline, start))
 		}
 	}
 
 	// The block itself, which is what most rules run against. It needs the
 	// offset as much as its children do.
 	blks = append(
-		blks, NewLinedBlock(ctx, blk.Text, blk.Scope, idx).at(base).withRuns(blk.Runs, 0))
+		blks, NewLinedBlock(ctx, blk.Text, blk.Scope, idx).at(base).withRuns(blk.Runs, 0).withInline(blk.Inline, 0))
 
 	return blks, nil
 }
