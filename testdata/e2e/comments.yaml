@@ -188,3 +188,42 @@ cases:
       test.mdx:2:1:Vale.Spelling:Did you really mean 'iptables'?
       test.mdx:2:44:Vale.Spelling:Did you really mean 'iptables'?
       test.mdx:3:9:Vale.Spelling:Did you really mean 'iptables'?
+
+  - name: off-region-after-imports
+    about: "#1073 -- ESM import lines before a vale-off region, holding
+      `@` and quotes, and a paragraph of imports inside it. The region
+      used to be missed, and a term inside an import path was reported."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/P/accept.txt: |
+        PR
+      test.md: |
+        ---
+        title: Azure PR comments
+        ---
+
+        import Tabs from '@theme/Tabs';
+        import TabItem from '@theme/TabItem';
+
+        <!-- vale off -->
+
+        import CustomComments from "/src/components/procedure/_customize_pr_mr_comments.mdx"
+        import DeploymentJourney from "/src/components/concept/_deployment-journey.mdx"
+        import PL from '@site/src/components/Placeholder';
+
+        <!-- vale on -->
+
+        ## Azure PR comments
+
+        More prose about a pr after.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:18:20:Vale.Terms:Use 'PR' instead of 'pr'.
