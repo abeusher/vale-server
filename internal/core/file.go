@@ -652,10 +652,12 @@ func (f *File) UpdateComments(comment string) {
 // leaves the comments inline -- has cancelled out by the time the paragraph
 // is linted. The recorded region suppresses the located alerts instead.
 func (f *File) UpdateCommentsAt(comment string, off int) {
+	// A region too, since a footnote's text is walked where the document
+	// renders it, at the end, not where it is written.
 	if comment == "vale off" { //nolint:gocritic
-		f.Comments["off"] = true
+		f.setComment("off", true, off)
 	} else if comment == "vale on" {
-		f.Comments["off"] = false
+		f.setComment("off", false, off)
 	} else if commentControlMatchesRE.MatchString(comment) {
 		check := commentControlMatchesRE.FindStringSubmatch(comment)
 		if len(check) == 4 {
@@ -717,7 +719,7 @@ func (f *File) RegionDisabled(check, match string, line, col int) bool {
 		return false
 	}
 
-	keys := []string{check}
+	keys := []string{"off", check}
 	if style := StyleName(check); style != check {
 		keys = append(keys, style)
 	}

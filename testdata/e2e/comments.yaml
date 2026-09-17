@@ -227,3 +227,37 @@ cases:
     exit: 0
     want: |
       test.md:18:20:Vale.Terms:Use 'PR' instead of 'pr'.
+
+  - name: footnote-in-off-region
+    about: "#1078 -- a footnote's text renders at the end of the document,
+      after every comment, so a vale-off toggle read in document order had
+      already been turned back on. The toggle is also a region, so the
+      footnote is judged by where it is written."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = T
+      styles/T/Annotations.yml: |
+        extends: existence
+        message: "'%s' left in text."
+        level: error
+        tokens:
+          - TODO
+      test.md: |
+        Text with a footnote[^note] and a TODO here.
+
+        <!-- vale off -->
+
+        [^note]: There is a group called the [TODO Group](https://todogroup.org/).
+
+        <!-- vale on -->
+
+        More text with a TODO that should be reported.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:35:T.Annotations:'TODO' left in text.
+      test.md:9:18:T.Annotations:'TODO' left in text.
