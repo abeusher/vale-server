@@ -99,6 +99,8 @@ func (l *Linter) lintFragments(f *core.File) error {
 		return err
 	}
 
+	wholeFile := f.Content
+
 	last := 0
 	for _, comment := range comments {
 		// QDoc reads `/*! ... */` only; a `//` line comment or a plain
@@ -135,5 +137,8 @@ func (l *Linter) lintFragments(f *core.File) error {
 		last = size
 	}
 
+	// Each comment was linted in the file's place; put the file back, so the
+	// `raw` scope that runs next reads the source and not the last comment.
+	f.RestoreText(wholeFile)
 	return err
 }

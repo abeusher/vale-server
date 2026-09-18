@@ -753,6 +753,52 @@ cases:
       widget.cpp:6:23:T.Tok:'ZQX' in a doc comment
       widget.cpp:8:26:T.Tok:'ZQX' in a doc comment
 
+  - name: qdoc-fragments-raw-scope
+    about: "a `scope: raw` rule reads the whole source of a fragment file, with
+      or without a doc comment in it; each comment is linted in the file's
+      place, and the file is put back before the raw scope runs"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        cpp = qdoc
+
+        [*.cpp]
+        T.Tok = YES
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        scope: raw
+        nonword: true
+        raw:
+          - ZQX
+      code_no_comment.cpp: |
+        #include "widget.h"
+
+        int ZQX_marker_one() { return 0; }
+
+        void Widget::other() {}
+      code_with_comment.cpp: |
+        #include "widget.h"
+
+        int ZQX_marker_one() { return 0; }
+
+        /*!
+            \fn void Widget::clicked()
+
+            Ordinary prose with no marker here.
+        */
+
+        void Widget::other() {}
+    args: .
+    exit: 1
+    want: |
+      code_no_comment.cpp:3:5:T.Tok:'ZQX' found
+      code_with_comment.cpp:3:5:T.Tok:'ZQX' found
+
   - name: qdocinc-include
     about: "a `.qdocinc` is an include, not a file of comments: its markup is
       the body of one, so nothing waits for a `/*!` that the file never
