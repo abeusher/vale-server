@@ -59,17 +59,35 @@ cases:
 
   - name: scoped
     about: "a `metric` or `readability` rule measures whatever block its scope
-      hands it: a heading, a paragraph, a list item, a `doc(...)` selection,
-      or -- with no scope -- the summary. A selection counts the elements it
-      holds, subheadings included, and the alert lands on the block's first
-      line. The Dense section reads harder than the file it sits in."
+      hands it: a heading, a paragraph, a list item, a sentence, a `doc(...)`
+      selection, or -- with no scope -- the summary. A selection counts the
+      elements it holds, subheadings included, and the alert lands on the
+      block's first line -- except a sentence's, which lands where the
+      sentence begins, so the second long sentence of a paragraph is not
+      dropped as a duplicate of the first. The Dense section reads harder
+      than the file it sits in."
     args: test.md
     exit: 0
     want: |
       test.md:1:1:M.Heading:A heading of 5.00 words. The budget is 4.
-      test.md:1:1:M.Whole:The file has 2.00 H2s.
+      test.md:1:1:M.Whole:The file has 3.00 H2s.
       test.md:5:1:M.Section:A section of 38.00 words. The budget is 35.
       test.md:5:1:M.Subheadings:A section with 2.00 subheadings. One is the limit.
       test.md:7:1:M.Paragraph:A paragraph of 31.00 words. The budget is 30.
+      test.md:7:1:M.Sentence:A sentence of 31.00 words. The budget is 12.
       test.md:17:1:M.Grade:Dense reads at grade 11.23. Aim below 10.
       test.md:20:1:M.ListItem:A list item of 21.00 words. The budget is 12.
+      test.md:20:3:M.Sentence:A sentence of 21.00 words. The budget is 12.
+      test.md:26:1:M.Sentence:A sentence of 14.00 words. The budget is 12.
+      test.md:26:82:M.Sentence:A sentence of 15.00 words. The budget is 12.
+
+  - name: scoped-text
+    dir: scoped
+    about: "plain text is one block that is its own context, and its
+      sentences are placed in the file's content: each lands where it begins,
+      the same as in Markdown."
+    args: test.txt
+    exit: 0
+    want: |
+      test.txt:3:1:M.Sentence:A sentence of 14.00 words. The budget is 12.
+      test.txt:3:82:M.Sentence:A sentence of 15.00 words. The budget is 12.

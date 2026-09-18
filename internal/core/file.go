@@ -537,12 +537,8 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 		// Before the measurement case: a zero-width match has no text either,
 		// but it does have a place.
 		a.Line, a.Span = f.byteLoc(blk.Context, a.Span[0], a.Span[1], pad)
-	case a.Match == "" && blk.Line >= 0 && blk.Line < len(f.Lines):
-		// A measurement has no text to find. It is reported at the start of
-		// its block's first line: the file's for the summary, the heading's
-		// for a section, the paragraph's for a paragraph.
-		a.Line = blk.Line + 1
-		a.Span = []int{1, 1}
+	case a.Match == "" && f.locateMeasurement(&a, blk, pad):
+		// A measurement has no text to find; locateMeasurement placed it.
 	case strings.HasPrefix(blk.Scope, "raw") && a.Match != "" &&
 		a.Span[0] >= 0 && a.Span[1] <= len(blk.Context) &&
 		blk.Context[a.Span[0]:a.Span[1]] == a.Match:
@@ -625,6 +621,35 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 			}
 		}
 	}
+}
+
+// locateMeasurement places an alert that has no text to find -- a measurement
+// -- and reports whether it could.
+//
+// It lands at the start of its block's first line: the file's for the summary,
+// the heading's for a section, the paragraph's for a paragraph. A sentence is
+// the one block that can begin mid-line, and it carries its paragraph's line:
+// reported there, every sentence after the first landed on a position already
+// taken and was dropped as a duplicate, so a sentence-scoped metric measured
+// each sentence and reported one. It lands where the sentence begins instead.
+// Plain text is a single block that is its own context, so its sentences are
+// placed in the file's content.
+func (f *File) locateMeasurement(a *Alert, blk nlp.Block, pad int) bool {
+	if strings.HasPrefix(blk.Scope, "sentence") {
+		ctx := blk.Context
+		if ctx == "" {
+			ctx = f.Content
+		}
+		if at := blk.SourceOffset(0); at >= 0 && at < len(ctx) {
+			a.Line, a.Span = f.byteLoc(ctx, at, at, pad)
+			return true
+		}
+	}
+	if blk.Line >= 0 && blk.Line < len(f.Lines) {
+		a.Line, a.Span = blk.Line+1, []int{1, 1}
+		return true
+	}
+	return false
 }
 
 // commentRegion is the span of the source between a comment directive that

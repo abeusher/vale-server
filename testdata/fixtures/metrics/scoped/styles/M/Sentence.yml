@@ -1,0 +1,5 @@
+extends: metric
+message: "A sentence of %s words. The budget is 12."
+scope: sentence
+formula: words
+condition: "> 12"
