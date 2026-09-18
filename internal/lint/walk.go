@@ -358,9 +358,21 @@ func (w *walker) count(metric string) {
 
 // closeSelection returns the selection whose element has just closed, once
 // the walker has flushed the element's own text, or nil.
+//
+// The aggregate leaves the open set here rather than when the end tag was
+// read: the flush between the two is what gathers a paragraph's or heading's
+// own text, and a selection on one gathered nothing when it was popped first.
 func (w *walker) closeSelection() *aggregate {
 	a := w.closed
 	w.closed = nil
+	if a != nil {
+		for i := len(w.aggs) - 1; i >= 0; i-- {
+			if w.aggs[i] == a {
+				w.aggs = append(w.aggs[:i], w.aggs[i+1:]...)
+				break
+			}
+		}
+	}
 	return a
 }
 
@@ -373,7 +385,6 @@ func (w *walker) unclose(tag string) {
 		if w.enclosing[i].tag == tag {
 			if a := w.enclosing[i].agg; a != nil {
 				w.closed = a
-				w.aggs = w.aggs[:len(w.aggs)-1]
 			}
 			w.enclosing = append(w.enclosing[:i], w.enclosing[i+1:]...)
 			return

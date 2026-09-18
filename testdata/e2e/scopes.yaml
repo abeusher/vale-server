@@ -489,3 +489,44 @@ cases:
       test.md:7:5:G.Draft:'draft' in a blockquote or list.
       test.md:9:5:G.Draft:'draft' in a blockquote or list.
       test.md:11:5:G.Todo:'TODO' in an h2 or h3.
+
+  - name: doc-leaf
+    about: "A selection on an element with no children of its own -- a
+      paragraph, a heading -- is that element's text as one block. It was
+      empty: the aggregate was dropped when the end tag was read, before the
+      flush that gathers the element's own text, so only a container with
+      children inside it ever had anything to lint."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = L
+      styles/L/Heading.yml: |
+        extends: existence
+        message: "'%s' in an h2."
+        level: error
+        scope: doc(h2)
+        tokens:
+          - TODO
+      styles/L/Lead.yml: |
+        extends: occurrence
+        message: "The paragraph after the title runs over 4 words."
+        level: error
+        scope: doc(h1 + p)
+        max: 4
+        token: \b\w+\b
+      test.md: |
+        # TODO top
+
+        A lead paragraph that runs long.
+
+        ## TODO second
+
+        A body paragraph.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:1:L.Lead:The paragraph after the title runs over 4 words.
+      test.md:5:4:L.Heading:'TODO' in an h2.
