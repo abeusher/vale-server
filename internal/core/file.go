@@ -306,7 +306,13 @@ func (f *File) MapAlertsToSource() {
 
 // SortedAlerts returns all of f's alerts sorted by line and column.
 func (f *File) SortedAlerts() []Alert {
-	sort.Sort(ByPosition(f.Alerts))
+	// Alerts are added in rule order, and a stable sort keeps that order for
+	// the ones that share a position -- two measurements of the same block,
+	// say. An unstable sort kept it too, but only by accident, for a dozen
+	// alerts or fewer: past that the algorithm changes, and two alerts at
+	// one position came out in an order that depended on how many others
+	// the file had.
+	sort.Stable(ByPosition(f.Alerts))
 	return f.Alerts
 }
 
@@ -627,15 +633,17 @@ func (f *File) AddAlert(a Alert, blk nlp.Block, lines, pad int, lookup bool) {
 // -- and reports whether it could.
 //
 // It lands at the start of its block's first line: the file's for the summary,
-// the heading's for a section, the paragraph's for a paragraph. A sentence is
-// the one block that can begin mid-line, and it carries its paragraph's line:
-// reported there, every sentence after the first landed on a position already
-// taken and was dropped as a duplicate, so a sentence-scoped metric measured
-// each sentence and reported one. It lands where the sentence begins instead.
-// Plain text is a single block that is its own context, so its sentences are
-// placed in the file's content.
+// the heading's for a section, the paragraph's for a paragraph. Two kinds of
+// block are placed by where they begin instead. A sentence is the one block
+// that can begin mid-line, and it carries its paragraph's line: reported
+// there, every sentence after the first landed on a position already taken
+// and was dropped as a duplicate, so a sentence-scoped metric measured each
+// sentence and reported one. And a block with no line of its own -- plain
+// text is a single block with none, and its paragraphs and sentences inherit
+// that -- has only its offset to say where it is. Plain text is also its own
+// context, so those blocks are placed in the file's content.
 func (f *File) locateMeasurement(a *Alert, blk nlp.Block, pad int) bool {
-	if strings.HasPrefix(blk.Scope, "sentence") {
+	if strings.HasPrefix(blk.Scope, "sentence") || blk.Line < 0 {
 		ctx := blk.Context
 		if ctx == "" {
 			ctx = f.Content

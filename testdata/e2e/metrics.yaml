@@ -78,16 +78,24 @@ cases:
       test.md:17:1:M.Grade:Dense reads at grade 11.23. Aim below 10.
       test.md:20:1:M.ListItem:A list item of 21.00 words. The budget is 12.
       test.md:20:3:M.Sentence:A sentence of 21.00 words. The budget is 12.
+      test.md:26:1:M.Band:A sentence of 14.00 words, in the 13-to-19 band.
       test.md:26:1:M.Sentence:A sentence of 14.00 words. The budget is 12.
+      test.md:26:82:M.Band:A sentence of 15.00 words, in the 13-to-19 band.
       test.md:26:82:M.Sentence:A sentence of 15.00 words. The budget is 12.
 
   - name: scoped-text
     dir: scoped
-    about: "plain text is one block that is its own context, and its
-      sentences are placed in the file's content: each lands where it begins,
-      the same as in Markdown."
+    about: "plain text is one block with no line of its own, and its paragraphs
+      and sentences inherit that, so each is placed by its offset in the
+      file's content: it lands where it begins, the same as in Markdown. A
+      condition reads its formula's value as `result`, so Band holds both
+      ends of a range without repeating the formula."
     args: test.txt
     exit: 0
     want: |
+      test.txt:3:1:M.Band:A sentence of 14.00 words, in the 13-to-19 band.
       test.txt:3:1:M.Sentence:A sentence of 14.00 words. The budget is 12.
+      test.txt:3:82:M.Band:A sentence of 15.00 words, in the 13-to-19 band.
       test.txt:3:82:M.Sentence:A sentence of 15.00 words. The budget is 12.
+      test.txt:5:1:M.Paragraph:A paragraph of 31.00 words. The budget is 30.
+      test.txt:5:1:M.Sentence:A sentence of 31.00 words. The budget is 12.

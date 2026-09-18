@@ -95,7 +95,11 @@ func (o Metric) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert, 
 			o.Name, "formula", o.path, err, errors.Is(ctx.Err(), context.DeadlineExceeded))
 	}
 
-	// The binary result of our formula:
+	// The binary result of our formula. The condition reads as a comparison
+	// against the result -- `> 9` -- and the result is also `result`, so a
+	// condition can bound it from both sides, or weigh it against another
+	// count, without repeating the formula: `>= 10 && result < 14`.
+	parameters["result"] = res
 	eqb := fmt.Sprintf("%f %s", res, o.Condition)
 
 	match, err := evalMath(ctx, eqb, parameters)
