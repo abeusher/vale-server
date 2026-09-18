@@ -26,7 +26,7 @@ type Manager struct {
 
 	scopes       map[string]struct{}
 	scopeRules   map[string][]string
-	docs         map[string]cascadia.Sel
+	docs         map[string]cascadia.Matcher
 	rules        map[string]Rule
 	styles       []string
 	needsTagging bool
@@ -43,7 +43,7 @@ func NewManager(config *core.Config) (*Manager, error) {
 		rules:      make(map[string]Rule),
 		scopes:     make(map[string]struct{}),
 		scopeRules: make(map[string][]string),
-		docs:       make(map[string]cascadia.Sel),
+		docs:       make(map[string]cascadia.Matcher),
 	}
 
 	// TODO: Should we only load these if we're using them?
@@ -138,7 +138,7 @@ func (mgr *Manager) Rules() map[string]Rule {
 // walker gives the elements it matches.
 type Selection struct {
 	ID  string
-	Sel cascadia.Sel
+	Sel cascadia.Matcher
 }
 
 // Selections returns every selector the loaded rules declare, in a stable

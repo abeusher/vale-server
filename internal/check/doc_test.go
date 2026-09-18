@@ -87,7 +87,7 @@ func TestDocMatches(t *testing.T) {
 
 // TestCompileSelector pins the standard spelling of a child selector.
 func TestCompileSelector(t *testing.T) {
-	for _, s := range []string{sel, "section:has( >h2)", "h2 + p", "ul:not(p + ul)"} {
+	for _, s := range []string{sel, "section:has( >h2)", "h2 + p", "ul:not(p + ul)", "h2, h3", "section:has(h2, h3)"} {
 		if _, err := compileSelector(s); err != nil {
 			t.Errorf("compileSelector(%q): %v", s, err)
 		}

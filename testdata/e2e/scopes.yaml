@@ -442,3 +442,50 @@ cases:
       test.md:3:61:T.Caps:Use 'Foo Bar' for 'foo bar'.
       test.md:5:8:T.Caps:Use 'Foo Bar' for 'foo bar'.
       test.md:5:53:T.Caps:Use 'Foo Bar' for 'foo bar'.
+
+  - name: doc-group
+    about: "A `doc(...)` selector may be a comma-separated group at the top
+      level, as it may inside `:has(...)`: `doc(blockquote, ul)` names either
+      element as the block, and `text & doc(h2, h3)` looks inside either."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = G
+      styles/G/Todo.yml: |
+        extends: existence
+        message: "'%s' in an h2 or h3."
+        level: error
+        scope: text & doc(h2, h3)
+        tokens:
+          - TODO
+      styles/G/Draft.yml: |
+        extends: existence
+        message: "'%s' in a blockquote or list."
+        level: error
+        scope: doc(blockquote, ul)
+        tokens:
+          - draft
+      test.md: |
+        # TODO top
+
+        ## TODO second
+
+        A draft paragraph.
+
+        > A draft quote.
+
+        - A draft item.
+
+        ### TODO third
+
+        #### TODO fourth
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:4:G.Todo:'TODO' in an h2 or h3.
+      test.md:7:5:G.Draft:'draft' in a blockquote or list.
+      test.md:9:5:G.Draft:'draft' in a blockquote or list.
+      test.md:11:5:G.Todo:'TODO' in an h2 or h3.

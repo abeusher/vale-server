@@ -267,8 +267,12 @@ func docID(sel string) string {
 var reHasChild = regexp.MustCompile(`:has\(\s*>\s*`)
 
 // compileSelector parses a `doc(...)` selector.
-func compileSelector(sel string) (cascadia.Sel, error) {
-	return cascadia.Parse(reHasChild.ReplaceAllString(sel, ":haschild("))
+//
+// A group, `h2, h3`, is accepted at the top level as it is inside `:has()`:
+// the single-selector parser stopped at the comma and reported the rest as
+// left over.
+func compileSelector(sel string) (cascadia.Matcher, error) {
+	return cascadia.ParseGroup(reHasChild.ReplaceAllString(sel, ":haschild("))
 }
 
 // DocSelectors returns the selectors named by `doc(...)` terms in a scope,
