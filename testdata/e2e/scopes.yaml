@@ -530,3 +530,77 @@ cases:
     want: |
       test.md:3:1:L.Lead:The paragraph after the title runs over 4 words.
       test.md:5:4:L.Heading:'TODO' in an h2.
+
+  - name: quote
+    about: "`quote` is the text between quotation marks, an inline scope like
+      `link`: a rule scoped to it reads speech, one scoped to `~quote` reads
+      narration with the speech left out, and a `doc(...)` selector may name
+      `q`. Markdown and plain text have no markup for a quotation, so the
+      marks are paired -- curly, straight, or single, with an apostrophe left
+      inside -- and an unclosed one runs to the end of its paragraph. HTML's
+      own `q` counts as one."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Q
+      styles/Q/Speech.yml: |
+        extends: existence
+        message: "'%s' in speech."
+        level: error
+        scope: quote
+        tokens:
+          - knew
+      styles/Q/Narration.yml: |
+        extends: existence
+        message: "'%s' in narration."
+        level: warning
+        scope: ~quote
+        tokens:
+          - knew
+      styles/Q/Long.yml: |
+        extends: occurrence
+        message: "%d words of speech."
+        level: suggestion
+        scope: quote
+        token: '\b\w+\b'
+        max: 3
+      test.md: |
+        # Title
+
+        "I knew it," she said. He knew nothing. *She* said, "we knew that much."
+
+        "An unclosed line, and she knew it
+
+        She knew that. ‘Don’t,’ he said, ‘I knew.’
+      test.txt: |
+        "I knew it," she said. He knew nothing. *She* said, "we knew that much."
+
+        "An unclosed line, and she knew it
+
+        She knew that. ‘Don’t,’ he said, ‘I knew.’
+      test.html: |
+        <p>He <q>knew</q> that "she knew" too.</p>
+    args: --output=line --no-exit test.md test.txt test.html
+    exit: 0
+    want: |
+      test.html:1:10:Q.Speech:'knew' in speech.
+      test.html:1:29:Q.Speech:'knew' in speech.
+      test.md:3:4:Q.Speech:'knew' in speech.
+      test.md:3:27:Q.Narration:'knew' in narration.
+      test.md:3:54:Q.Long:4 words of speech.
+      test.md:3:57:Q.Speech:'knew' in speech.
+      test.md:5:2:Q.Long:7 words of speech.
+      test.md:5:28:Q.Speech:'knew' in speech.
+      test.md:7:5:Q.Narration:'knew' in narration.
+      test.md:7:37:Q.Speech:'knew' in speech.
+      test.txt:1:4:Q.Speech:'knew' in speech.
+      test.txt:1:27:Q.Narration:'knew' in narration.
+      test.txt:1:54:Q.Long:4 words of speech.
+      test.txt:1:57:Q.Speech:'knew' in speech.
+      test.txt:3:2:Q.Long:7 words of speech.
+      test.txt:3:28:Q.Speech:'knew' in speech.
+      test.txt:5:5:Q.Narration:'knew' in narration.
+      test.txt:5:37:Q.Speech:'knew' in speech.

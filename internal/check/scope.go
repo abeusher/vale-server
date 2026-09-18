@@ -64,7 +64,7 @@ type Scope struct {
 }
 
 // inlineScopes are the scopes an inline element carries on its own.
-var inlineScopes = map[string]bool{"link": true, "strong": true, "emphasis": true, "code": true}
+var inlineScopes = map[string]bool{"link": true, "strong": true, "emphasis": true, "code": true, "quote": true}
 
 func NewSelector(value []string) Selector {
 	negated := false

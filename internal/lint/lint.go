@@ -379,7 +379,29 @@ func (l *Linter) lintProse(f *core.File, blk nlp.Block, lines int, split bool) e
 
 func (l *Linter) lintTxt(f *core.File) error {
 	block := nlp.NewBlock("", f.Content, "text"+f.MetaScope+f.RealExt)
-	return l.lintProse(f, block, len(f.Lines), true)
+
+	// Plain text never becomes HTML, so its quotations are paired here and
+	// carried as inline runs, the way the walker carries a `q`.
+	if l.Manager.HasScope("quote") {
+		for _, span := range quoteSpans(f.Content) {
+			block.Inline = append(block.Inline, nlp.Inline{Scope: "quote", Begin: span[0], End: span[1]})
+		}
+	}
+
+	if err := l.lintProse(f, block, len(f.Lines), true); err != nil {
+		return err
+	}
+
+	for _, in := range block.Inline {
+		text := f.Content[in.Begin:in.End]
+		line := 1 + strings.Count(f.Content[:in.Begin], "\n")
+		b := nlp.NewLinedBlock(f.Content, text, "quote"+f.MetaScope+f.RealExt, line)
+		b.Offset = in.Begin
+		if err := l.lintBlock(f, b, len(f.Lines), 0, false); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (l *Linter) lintLines(f *core.File) error {

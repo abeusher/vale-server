@@ -133,4 +133,7 @@ func TestScopeExcluded(t *testing.T) {
 	if got := NewScope([]string{"~heading"}).Excluded; len(got) != 0 {
 		t.Errorf("~heading excludes no inline scope, got %v", got)
 	}
+	if got := NewScope([]string{"~quote"}).Excluded; len(got) != 1 || got[0] != "quote" {
+		t.Errorf("~quote should exclude the quote scope, got %v", got)
+	}
 }

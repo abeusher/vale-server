@@ -29,15 +29,21 @@ const markAttr = "data-vale-doc"
 // walker reads. The mark then reaches each block inside the element as an
 // `in.<id>` part of its scope, which is what the selector's rule matches on.
 //
-// This runs only when some rule declares a selector, so a style without one
-// reads the document exactly as before.
-func markSelections(raw []byte, sels []check.Selection) ([]byte, error) {
+// With `quotes`, each quotation is wrapped in a `q` as well, so that a rule
+// scoped to `quote` finds it and one scoped to `~quote` leaves it out.
+//
+// This runs only when some rule declares a selector or asks for quotations,
+// so a style with neither reads the document exactly as before.
+func markSelections(raw []byte, sels []check.Selection, quotes bool) ([]byte, error) {
 	doc, err := html.Parse(bytes.NewReader(raw))
 	if err != nil {
 		return raw, err
 	}
 
 	wrapSections(doc)
+	if quotes {
+		wrapQuotes(doc)
+	}
 	for _, s := range sels {
 		for _, n := range cascadia.QueryAll(doc, s.Sel) {
 			mark(n, s.ID)

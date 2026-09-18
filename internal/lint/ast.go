@@ -21,7 +21,7 @@ var skipTags = []string{"script", "style", "pre", "figure", "noscript", "iframe"
 var skipClasses = []string{"problematic", "pre", "code"}
 var inlineTags = []string{
 	"b", "big", "i", "small", "abbr", "acronym", "cite", "dfn", "em", "kbd",
-	"strong", "a", "br", "img", "span", "sub", "sup", "code", "tt", "del"}
+	"strong", "a", "br", "img", "span", "sub", "sup", "code", "tt", "del", "q"}
 
 // voidTags never carry content, so they are never "open" as containers.
 var voidTags = []string{
@@ -43,6 +43,7 @@ var inlineToScope = map[string]string{
 	"i":      "emphasis",
 	"code":   "code",
 	"tt":     "code",
+	"q":      "quote",
 }
 
 var tagToScope = map[string]string{
@@ -95,8 +96,11 @@ func (l *Linter) lintHTMLTokens(f *core.File, raw []byte, offset int) error { //
 	}
 	var open []inlineCapture
 
-	if sels := l.Manager.Selections(); len(sels) > 0 {
-		marked, err := markSelections(raw, sels)
+	// A rule that names `quote` needs the quotations marked up, which no
+	// format but HTML does on its own.
+	quotes := l.Manager.HasScope("quote")
+	if sels := l.Manager.Selections(); len(sels) > 0 || quotes {
+		marked, err := markSelections(raw, sels, quotes)
 		if err != nil {
 			return core.NewE100(f.Path, err)
 		}

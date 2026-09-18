@@ -20,7 +20,7 @@ func TestWrapSections(t *testing.T) {
 		"<section><h2>B</h2><p>d</p><blockquote><section><h4>Q</h4><p>e</p></section></blockquote></section>" +
 		"</section>"
 
-	got, err := markSelections([]byte(in), nil)
+	got, err := markSelections([]byte(in), nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestMarkSelections(t *testing.T) {
 		{ID: "s3", Sel: mustParse(`h2:contains("A")`)},
 	}
 
-	got, err := markSelections([]byte(in), sels)
+	got, err := markSelections([]byte(in), sels, false)
 	if err != nil {
 		t.Fatal(err)
 	}
