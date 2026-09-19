@@ -3,18 +3,20 @@ package core
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/adrg/xdg"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/errata-ai/ini"
 
-	"github.com/errata-ai/vale/v3/internal/glob"
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/vale-cli/vale/v3/internal/glob"
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
 var (
@@ -163,61 +165,72 @@ func DefaultStylesPath() (string, error) {
 //
 // For example, `vale --minAlertLevel=error`.
 type CLIFlags struct {
-	AlertLevel   string
-	Built        string
-	Glob         string
-	InExt        string
-	InPath       string
-	Output       string
-	Path         string
-	Sources      string
-	Filter       string
-	Local        bool
-	NoExit       bool
-	Normalize    bool
-	Relative     bool
-	Remote       bool
-	Simple       bool
-	Sorted       bool
-	Wrap         bool
-	Version      bool
-	Help         bool
-	IgnoreGlobal bool
+	AlertLevel    string
+	Built         string
+	Glob          string
+	InExt         string
+	InPath        string
+	Output        string
+	Path          string
+	Sources       string
+	Filter        string
+	Apply         bool
+	Counts        bool
+	Local         bool
+	NoExit        bool
+	NoColor       bool
+	PlainProgress bool
+	Normalize     bool
+	Relative      bool
+	Remote        bool
+	Simple        bool
+	Sorted        bool
+	Wrap          bool
+	Version       bool
+	Help          bool
+	IgnoreGlobal  bool
 }
 
 // Config holds the configuration values from both the CLI and `.vale.ini`.
 type Config struct {
 	// General configuration
-	BlockIgnores      map[string][]string        // A list of blocks to ignore
-	Checks            []string                   // All checks to load
-	Formats           map[string]string          // A map of unknown -> known formats
-	Asciidoctor       map[string]string          // A map of asciidoctor attributes
-	FormatToLang      map[string]string          // A map of format to lang ID
-	GBaseStyles       []string                   // Global base style
-	GChecks           map[string]bool            // Global checks
-	IgnoredClasses    []string                   // A list of HTML classes to ignore
-	IgnoredScopes     []string                   // A list of HTML tags to ignore
-	MinAlertLevel     int                        // Lowest alert level to display
-	Vocab             []string                   // The active project
-	RuleToLevel       map[string]string          // Single-rule level changes
-	SBaseStyles       map[string][]string        // Syntax-specific base styles
-	SChecks           map[string]map[string]bool // Syntax-specific checks
-	SkippedScopes     []string                   // A list of HTML blocks to ignore
-	Stylesheets       map[string]string          // XSLT stylesheet
-	TokenIgnores      map[string][]string        // A list of tokens to ignore
-	CommentDelimiters map[string][2]string       // Strings to treat as comment delimiters. Indicates the start and end delimiters.
-	WordTemplate      string                     // The template used in YAML -> regexp list conversions
-	RootINI           string                     // the path to the project's .vale.ini file
-	Paths             []string                   // A list of paths to search for styles
-	ConfigFiles       []string                   // A list of configuration files to load
+	BlockIgnores      map[string][]string          // A list of blocks to ignore
+	Checks            []string                     // All checks to load
+	Formats           map[string]string            // A map of unknown -> known formats
+	Asciidoctor       map[string]string            // A map of asciidoctor attributes
+	FormatToLang      map[string]string            // A map of format to lang ID
+	GBaseStyles       []string                     // Global base style
+	GChecks           map[string]bool              // Global checks
+	IgnoredClasses    []string                     // A list of HTML classes to ignore
+	IgnoredScopes     []string                     // A list of HTML tags to ignore
+	MinAlertLevel     int                          // Lowest alert level to display
+	Vocab             []string                     // The active project
+	RuleToLevel       map[string]string            // Single-rule level changes
+	RuleToParams      map[string]map[string]string // Single-rule scalar overrides
+	SBaseStyles       map[string][]string          // Syntax-specific base styles
+	SChecks           map[string]map[string]bool   // Syntax-specific checks
+	SLevels           map[string]map[string]string // Syntax-specific level changes
+	SUnsets           map[string][]string          // Keys a section marked UNSET
+	SVocab            map[string][]string          // Vocabularies a section names
+	Vocabularies      map[string]*Vocabulary       // Every vocabulary loaded, by name
+	SkippedScopes     []string                     // A list of HTML blocks to ignore
+	Stylesheets       map[string]string            // XSLT stylesheet
+	TokenIgnores      map[string][]string          // A list of tokens to ignore
+	CommentDelimiters map[string][2]string         // Strings to treat as comment delimiters. Indicates the start and end delimiters.
+	WordTemplate      string                       // The template used in YAML -> regexp list conversions
+	RootINI           string                       // the path to the project's .vale.ini file
+	Paths             []string                     // A list of paths to search for styles
+	ConfigFiles       []string                     // A list of configuration files to load
 
 	AcceptedTokens []string `json:"-"` // Project-specific vocabulary (okay)
 	RejectedTokens []string `json:"-"` // Project-specific vocabulary (avoid)
 
-	FallbackPath string               `json:"-"`
-	SecToPat     map[string]glob.Glob `json:"-"`
-	Styles       []string             `json:"-"`
-	Views        map[string]*View     `json:"-"`
+	FallbackPath string `json:"-"`
+
+	cache    *sync.Map            // what checks build from this configuration, by key
+	SecToPat map[string]glob.Glob `json:"-"`
+	Styles   []string             `json:"-"`
+	Views    map[string]*View     `json:"-"`
 
 	NLPEndpoint string // An external API to call for NLP-related work.
 
@@ -239,8 +252,14 @@ func NewConfig(flags *CLIFlags) (*Config, error) {
 	cfg.GChecks = make(map[string]bool)
 	cfg.MinAlertLevel = 0
 	cfg.RuleToLevel = make(map[string]string)
+	cfg.RuleToParams = make(map[string]map[string]string)
 	cfg.SBaseStyles = make(map[string][]string)
 	cfg.SChecks = make(map[string]map[string]bool)
+	cfg.SLevels = make(map[string]map[string]string)
+	cfg.SUnsets = make(map[string][]string)
+	cfg.SVocab = make(map[string][]string)
+	cfg.Vocabularies = make(map[string]*Vocabulary)
+	cfg.cache = &sync.Map{}
 	cfg.SecToPat = make(map[string]glob.Glob)
 	cfg.Stylesheets = make(map[string]string)
 	cfg.TokenIgnores = make(map[string][]string)
@@ -284,21 +303,14 @@ func (c *Config) ConfigFile() string {
 }
 
 // Root returns the first configuration file in the list.
+//
+// NOTE: loading records every config file we read -- including the default one
+// -- so an empty list means that we found nothing to read.
 func (c *Config) Root() (string, error) {
 	if len(c.ConfigFiles) > 0 {
 		return c.ConfigFiles[0], nil
 	}
-
-	root, err := DefaultConfig()
-	if err != nil {
-		return "", err
-	}
-
-	if !system.FileExists(root) {
-		return "", fmt.Errorf("no .vale.ini file found")
-	}
-
-	return root, nil
+	return "", errors.New("no .vale.ini file found")
 }
 
 // GetStylesPath returns the last path in the list.
@@ -318,6 +330,37 @@ func (c *Config) SearchPaths() []string {
 		return []string{""}
 	}
 	return c.Paths
+}
+
+// A Vocabulary is what one `config/vocabularies` directory holds.
+type Vocabulary struct {
+	Accepted []string
+	Rejected []string
+}
+
+// SectionVocabs names every vocabulary some section uses.
+func (c *Config) SectionVocabs() []string {
+	var names []string
+	for _, sec := range c.RuleKeys {
+		for _, name := range c.SVocab[sec] {
+			if !StringInSlice(name, names) {
+				names = append(names, name)
+			}
+		}
+	}
+	return names
+}
+
+// Cached returns what build makes for key, building it once per config.
+func (c *Config) Cached(key string, build func() any) any {
+	if c.cache == nil {
+		c.cache = &sync.Map{}
+	}
+	if v, ok := c.cache.Load(key); ok {
+		return v
+	}
+	v, _ := c.cache.LoadOrStore(key, build())
+	return v
 }
 
 // AddWordListFile adds vocab terms from a provided file.

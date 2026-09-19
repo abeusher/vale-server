@@ -9,8 +9,8 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
 // Style represents an externally-hosted style.
@@ -49,10 +49,14 @@ type Meta struct {
 
 func init() {
 	pflag.BoolVar(&Flags.Remote, "mode-rev-compat", false,
-		"prioritize local Vale configurations")
-	pflag.StringVar(&Flags.Built, "built", "", "post-processed file path")
+		"Prioritize remote Vale configurations.")
+	pflag.StringVar(&Flags.Built, "built", "", "A post-processed file path.")
 
-	Actions["install"] = install
+	commands["install"] = command{
+		Run:     install,
+		Summary: "Install a package from a URL.",
+		Hidden:  true,
+	}
 }
 
 func fetch(src, dst string) error {

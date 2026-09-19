@@ -1,0 +1,582 @@
+# Command-line behavior: multiple targets, stdin, and output formats.
+name: cli
+dir: fixtures/formats
+
+cases:
+  - name: output-template
+    dir: ../templates
+    args: "--output=line.tmpl ."
+    exit: 0
+    want: |
+      test.md:3:1:vale.Annotations:suggestion:'NOTE' left in text
+      test.md:32:1:vale.Annotations:suggestion:'XXX' left in text
+      test.md:34:29:vale.Annotations:suggestion:'TODO' left in text
+      test.md:36:3:vale.Annotations:suggestion:'TODO' left in text
+      test.md:36:10:vale.Annotations:suggestion:'XXX' left in text
+      test.md:36:16:vale.Annotations:suggestion:'FIXME' left in text
+      test.md:40:21:vale.Annotations:suggestion:'FIXME' left in text
+      test.md:44:5:vale.Annotations:suggestion:'TODO' left in text
+      test.md:46:3:vale.Annotations:suggestion:'TODO' left in text
+
+  - name: file-and-dir
+    args: test.json subdir1
+    exit: 0
+    want: |
+      subdir1/test.hs:2:4:vale.Annotations:'NOTE' left in text
+      subdir1/test.hs:5:6:vale.Annotations:'TODO' left in text
+      subdir1/test.hs:6:25:vale.Annotations:'XXX' left in text
+      subdir1/test.hs:11:41:vale.Annotations:'XXX' left in text
+      subdir1/test.rs:1:5:vale.Annotations:'NOTE' left in text
+      subdir1/test.rs:3:5:vale.Annotations:'XXX' left in text
+      subdir1/test.rs:5:17:vale.Annotations:'TODO' left in text
+      subdir1/test.rs:7:4:vale.Annotations:'FIXME' left in text
+      subdir1/test.rs:9:5:vale.Annotations:'XXX' left in text
+      test.json:9:10:vale.Annotations:'XXX' left in text
+      test.json:12:19:vale.Annotations:'TODO' left in text
+
+  - name: two-dirs
+    args: subdir1 subdir2
+    exit: 0
+    want: |
+      subdir1/test.hs:2:4:vale.Annotations:'NOTE' left in text
+      subdir1/test.hs:5:6:vale.Annotations:'TODO' left in text
+      subdir1/test.hs:6:25:vale.Annotations:'XXX' left in text
+      subdir1/test.hs:11:41:vale.Annotations:'XXX' left in text
+      subdir1/test.rs:1:5:vale.Annotations:'NOTE' left in text
+      subdir1/test.rs:3:5:vale.Annotations:'XXX' left in text
+      subdir1/test.rs:5:17:vale.Annotations:'TODO' left in text
+      subdir1/test.rs:7:4:vale.Annotations:'FIXME' left in text
+      subdir1/test.rs:9:5:vale.Annotations:'XXX' left in text
+      subdir2/test.lua:1:4:vale.Annotations:'NOTE' left in text
+      subdir2/test.lua:2:19:vale.Annotations:'XXX' left in text
+      subdir2/test.lua:5:7:vale.Annotations:'NOTE' left in text
+      subdir2/test.lua:9:6:vale.Annotations:'XXX' left in text
+      subdir2/test.lua:15:4:vale.Annotations:'TODO' left in text
+
+  - name: two-files
+    args: test.json test.txt
+    exit: 0
+    want: |
+      test.json:9:10:vale.Annotations:'XXX' left in text
+      test.json:12:19:vale.Annotations:'TODO' left in text
+      test.txt:1:27:vale.Annotations:'NOTE' left in text
+      test.txt:4:12:vale.Annotations:'XXX' left in text
+      test.txt:4:66:vale.Annotations:'TODO' left in text
+
+  - name: three-files
+    args: test.json test.txt test.cc
+    exit: 0
+    want: |
+      test.cc:1:4:vale.Annotations:'XXX' left in text
+      test.cc:9:6:vale.Annotations:'NOTE' left in text
+      test.cc:13:6:vale.Annotations:'XXX' left in text
+      test.cc:17:5:vale.Annotations:'FIXME' left in text
+      test.cc:20:5:vale.Annotations:'XXX' left in text
+      test.cc:23:37:vale.Annotations:'XXX' left in text
+      test.json:9:10:vale.Annotations:'XXX' left in text
+      test.json:12:19:vale.Annotations:'TODO' left in text
+      test.txt:1:27:vale.Annotations:'NOTE' left in text
+      test.txt:4:12:vale.Annotations:'XXX' left in text
+      test.txt:4:66:vale.Annotations:'TODO' left in text
+
+  - name: literal-arg
+    about: a bare string, not a path
+    args: XXX
+    exit: 0
+    want: |
+      stdin.txt:1:1:vale.Annotations:'XXX' left in text
+
+  - name: pipe-text
+    args: "--ext=.txt"
+    stdin: test.txt
+    exit: 0
+    want: |
+      stdin.txt:1:27:vale.Annotations:'NOTE' left in text
+      stdin.txt:4:12:vale.Annotations:'XXX' left in text
+      stdin.txt:4:66:vale.Annotations:'TODO' left in text
+
+  - name: pipe-markdown
+    args: "--ext=.md"
+    stdin: test.md
+    exit: 0
+    want: |
+      stdin.md:3:1:vale.Annotations:'NOTE' left in text
+      stdin.md:32:1:vale.Annotations:'XXX' left in text
+      stdin.md:34:29:vale.Annotations:'TODO' left in text
+      stdin.md:36:3:vale.Annotations:'TODO' left in text
+      stdin.md:36:10:vale.Annotations:'XXX' left in text
+      stdin.md:36:16:vale.Annotations:'FIXME' left in text
+      stdin.md:40:21:vale.Annotations:'FIXME' left in text
+      stdin.md:44:5:vale.Annotations:'TODO' left in text
+      stdin.md:46:3:vale.Annotations:'TODO' left in text
+
+  - name: pipe-python
+    args: "--ext=.py"
+    stdin: test.py
+    exit: 0
+    want: |
+      stdin.py:1:3:vale.Annotations:'FIXME' left in text
+      stdin.py:5:5:vale.Annotations:'FIXME' left in text
+      stdin.py:11:3:vale.Annotations:'XXX' left in text
+      stdin.py:13:16:vale.Annotations:'XXX' left in text
+      stdin.py:14:14:vale.Annotations:'NOTE' left in text
+      stdin.py:28:5:vale.Annotations:'NOTE' left in text
+      stdin.py:35:8:vale.Annotations:'NOTE' left in text
+      stdin.py:37:5:vale.Annotations:'TODO' left in text
+
+  - name: fix-script
+    dir: ../actions
+    args: fix script.json
+    exit: 0
+    want: |
+      {
+          "suggestions": [
+              "foo_bar"
+          ],
+          "error": ""
+      }
+
+  - name: fix-spelling-from-vocabulary
+    about: "A spelling suggestion draws on the project's vocabularies as
+      well as the dictionary: an accepted term as close as any dictionary
+      word comes first, spelled as the vocabulary spells it."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = Proj
+
+        [*.md]
+        BasedOnStyles = Vale
+      styles/config/vocabularies/Proj/accept.txt: |
+        Kubernetes
+        kubectl
+      alert.json: |
+        {
+          "Action": {"Name": "suggest", "Params": ["spellings"]},
+          "Span": [5, 11],
+          "Check": "Vale.Spelling",
+          "Description": "",
+          "Link": "",
+          "Message": "Did you really mean 'kubctl'?",
+          "Severity": "error",
+          "Match": "kubctl",
+          "Line": 1
+        }
+    args: fix alert.json
+    exit: 0
+    want: |
+      {
+          "suggestions": [
+              "kubectl",
+              "cubical",
+              "cubital",
+              "Dubcek",
+              "Jubal",
+              "btl"
+          ],
+          "error": ""
+      }
+
+  - name: json-terms-suggestions
+    about: "A Terms alert offers the vocabulary's spelling as a fix when it
+      is plain text, so an editor can apply it. A term written as a pattern
+      the match can't be re-cased to, like `[Pp]ython`, offers nothing
+      rather than the pattern itself."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/P/accept.txt: |
+        Kubernetes
+        [Pp]ython
+        OAuth2?
+      doc.md: |
+        We run kubernetes, PYTHON, and oauth2 here.
+    args: --output=JSON doc.md
+    exit: 1
+    want: |
+      {
+        "doc.md": [
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "Kubernetes"
+              ]
+            },
+            "Suggestions": [
+              "Kubernetes"
+            ],
+            "Span": [
+              8,
+              17
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'Kubernetes' instead of 'kubernetes'.",
+            "Severity": "error",
+            "Match": "kubernetes",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              20,
+              25
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use '[Pp]ython' instead of 'PYTHON'.",
+            "Severity": "error",
+            "Match": "PYTHON",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "OAuth2"
+              ]
+            },
+            "Suggestions": [
+              "OAuth2"
+            ],
+            "Span": [
+              32,
+              37
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'OAuth2' instead of 'oauth2'.",
+            "Severity": "error",
+            "Match": "oauth2",
+            "Line": 1
+          }
+        ]
+      }
+
+  - name: json-vocab-phrases
+    about: "A vocabulary phrase matches across a line wrap: a wrongly cased
+      one is reported, with a fix that keeps the wrap, and a correctly cased
+      one is not. A period in a term is text, so `Node.js runtime` does not
+      accept `nodexjs runtime`, and is offered as a fix."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+      styles/config/vocabularies/P/accept.txt: |
+        mea culpa
+        Node.js runtime
+        OAuth2?
+      styles/config/vocabularies/P/reject.txt: |
+        end user
+      doc4.md: |
+        Say Mea
+        Culpa here, and mea
+        culpa there.
+
+        The nodexjs runtime and the node.js runtime, oauth2 too.
+
+        For the end
+        user and the end user.
+    args: --output=JSON doc4.md
+    exit: 1
+    want: |
+      {
+        "doc4.md": [
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "mea\nculpa"
+              ]
+            },
+            "Suggestions": [
+              "mea\nculpa"
+            ],
+            "Span": [
+              5,
+              13
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'mea culpa' instead of 'Mea Culpa'.",
+            "Severity": "error",
+            "Match": "Mea\nCulpa",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "suggest",
+              "Params": [
+                "spellings"
+              ]
+            },
+            "Suggestions": [],
+            "Span": [
+              5,
+              11
+            ],
+            "Check": "Vale.Spelling",
+            "Description": "",
+            "Link": "",
+            "Message": "Did you really mean 'nodexjs'?",
+            "Severity": "error",
+            "Match": "nodexjs",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "Node.js runtime"
+              ]
+            },
+            "Suggestions": [
+              "Node.js runtime"
+            ],
+            "Span": [
+              29,
+              43
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'Node.js runtime' instead of 'node.js runtime'.",
+            "Severity": "error",
+            "Match": "node.js runtime",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "OAuth2"
+              ]
+            },
+            "Suggestions": [
+              "OAuth2"
+            ],
+            "Span": [
+              46,
+              51
+            ],
+            "Check": "Vale.Terms",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'OAuth2' instead of 'oauth2'.",
+            "Severity": "error",
+            "Match": "oauth2",
+            "Line": 5
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              9,
+              16
+            ],
+            "Check": "Vale.Avoid",
+            "Description": "",
+            "Link": "",
+            "Message": "Avoid using 'end user'.",
+            "Severity": "error",
+            "Match": "end\nuser",
+            "Line": 7
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              14,
+              21
+            ],
+            "Check": "Vale.Avoid",
+            "Description": "",
+            "Link": "",
+            "Message": "Avoid using 'end user'.",
+            "Severity": "error",
+            "Match": "end user",
+            "Line": 8
+          }
+        ]
+      }
+
+  - name: json-suggestions
+    about: "JSON output carries what an action resolves to, so a consumer
+      reads the answer rather than re-running the recipe; an alert without an
+      action carries an empty list"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        T.Swap = YES
+        T.Trim = YES
+        T.Plain = YES
+      styles/T/Swap.yml: |
+        extends: substitution
+        message: "Use '%s' instead of '%s'."
+        level: error
+        action:
+          name: replace
+        swap:
+          utilize: use
+      styles/T/Trim.yml: |
+        extends: existence
+        message: "'%s' should be '%s'."
+        level: error
+        nonword: true
+        action:
+          name: edit
+          params:
+            - trim_right
+            - '!'
+        tokens:
+          - 'Wow!'
+      styles/T/Plain.yml: |
+        extends: existence
+        message: "Avoid '%s'."
+        level: error
+        tokens:
+          - plain
+      doc.md: |
+        Wow! We utilize the plain API.
+    args: --output=JSON doc.md
+    exit: 1
+    want: |
+      {
+        "doc.md": [
+          {
+            "Action": {
+              "Name": "edit",
+              "Params": [
+                "trim_right",
+                "!"
+              ]
+            },
+            "Suggestions": [
+              "Wow"
+            ],
+            "Span": [
+              1,
+              4
+            ],
+            "Check": "T.Trim",
+            "Description": "",
+            "Link": "",
+            "Message": "'Wow!' should be 'Wow'.",
+            "Severity": "error",
+            "Match": "Wow!",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "replace",
+              "Params": [
+                "use"
+              ]
+            },
+            "Suggestions": [
+              "use"
+            ],
+            "Span": [
+              9,
+              15
+            ],
+            "Check": "T.Swap",
+            "Description": "",
+            "Link": "",
+            "Message": "Use 'use' instead of 'utilize'.",
+            "Severity": "error",
+            "Match": "utilize",
+            "Line": 1
+          },
+          {
+            "Action": {
+              "Name": "",
+              "Params": null
+            },
+            "Suggestions": [],
+            "Span": [
+              21,
+              25
+            ],
+            "Check": "T.Plain",
+            "Description": "",
+            "Link": "",
+            "Message": "Avoid 'plain'.",
+            "Severity": "error",
+            "Match": "plain",
+            "Line": 1
+          }
+        ]
+      }
+
+  - name: edit-groups
+    about: "an action's arguments can name the matched token's groups, so a
+      pattern rule can reorder or reuse what it matched without a regex step
+      that matches it again"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        T.Order = YES
+        T.Code = YES
+      styles/T/Order.yml: |
+        extends: existence
+        message: "Put the family name first: '%s' should be '%s'."
+        level: error
+        nonword: true
+        action:
+          name: replace
+          params:
+            - '$2, $1'
+        tokens:
+          - '\b([A-Z][a-z]+) ([A-Z][a-z]+) \(author\)'
+      styles/T/Code.yml: |
+        extends: existence
+        message: "Format '%s' as code, '%s'."
+        level: error
+        nonword: true
+        action:
+          name: edit
+          params:
+            - [split, ' ', '2']
+            - [wrap, '`']
+        tokens:
+          - 'the option --[a-z-]+'
+      doc.md: |
+        Ada Lovelace (author) proposed the option --no-exit.
+    args: --output=line doc.md
+    exit: 1
+    want: |
+      doc.md:1:1:T.Order:Put the family name first: 'Ada Lovelace (author)' should be 'Lovelace, Ada'.
+      doc.md:1:32:T.Code:Format 'the option --no-exit' as code, '`--no-exit`'.

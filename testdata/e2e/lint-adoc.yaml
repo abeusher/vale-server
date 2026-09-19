@@ -1,0 +1,110 @@
+# AsciiDoc, against a fixture with its own configuration and styles.
+name: lint/adoc
+dir: fixtures/formats/adoc
+
+cases:
+  - name: basic
+    args: test.adoc
+    requires: asciidoctor
+    exit: 1
+    want: |
+      test.adoc:1:24:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:3:33:Test.Rule:Use 'Web source' instead of 'web Source'.
+      test.adoc:9:33:Test.Rule:Use 'Web sources' instead of 'web sources'.
+      test.adoc:11:36:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:13:23:Test.Rule:Use 'Web sources' instead of 'Web Sources'.
+      test.adoc:15:4:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:17:30:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:19:12:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:19:23:Test.Rule:Use 'Web source' instead of 'web source'.
+      test.adoc:19:46:Test.Rule:Use 'Web sources' instead of 'Web Sources'.
+      test.adoc:19:58:Test.Rule:Use 'Web sources' instead of 'web sources'.
+      test.adoc:22:3:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:23:3:Test.Rule:Use 'Web source' instead of 'web source'.
+      test.adoc:25:3:Test.Rule:Use 'Web sources' instead of 'Web Sources'.
+      test.adoc:26:3:Test.Rule:Use 'Web sources' instead of 'web sources'.
+      test.adoc:30:2:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:31:2:Test.Rule:Use 'Web source' instead of 'web source'.
+      test.adoc:34:2:Test.Rule:Use 'Web source' instead of 'Web Source'.
+      test.adoc:35:2:Test.Rule:Use 'Web source' instead of 'web source'.
+      test.adoc:38:2:Test.Rule:Use 'Web sources' instead of 'Web Sources'.
+      test.adoc:39:2:Test.Rule:Use 'Web sources' instead of 'web sources'.
+
+  - name: listing-block
+    args: test2.adoc
+    requires: asciidoctor
+    exit: 1
+    want: |
+      test2.adoc:3:17:Test.Rule2:Consider using 'AsciiDoc' instead of 'Asciidoc'
+      test2.adoc:11:16:Test.Rule2:Consider using 'AsciiDoc' instead of 'asciidoc'
+      test2.adoc:19:16:Test.Rule2:Consider using 'AsciiDoc' instead of 'asciidoc'
+
+  - name: attributes
+    args: test3.adoc
+    requires: asciidoctor
+    exit: 0
+    want: ""
+
+  - name: header-attribute
+    about: "#1112"
+    args: test4.adoc
+    requires: asciidoctor
+    exit: 1
+    want: |
+      test4.adoc:2:283:Test.Semicolons:semicolon match
+
+  - name: table-caption
+    about: "#1152 -- Asciidoctor prefixes a block title with 'Table 1.',
+      generated text that appears nowhere in the source. A match against the
+      prefix used to land on an unrelated list marker downstream; the label
+      is now disabled, and the authored title still lints in place."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        Test.Dot = YES
+        Test.Caption = YES
+      styles/Test/Dot.yml: |
+        extends: existence
+        message: "Matched period-space-capital."
+        level: warning
+        nonword: true
+        tokens:
+          - '\. [A-Z]'
+      styles/Test/Caption.yml: |
+        extends: existence
+        message: "'%s' in a caption."
+        level: warning
+        scope: table.caption
+        tokens:
+          - Valid
+      test.adoc: |
+        .Valid Items
+        [cols="1,1",options="header"]
+        |===
+        | Name | Value
+        | `item-a` | 100
+        |===
+
+        1. Perform the task.
+
+        a. Run the first command.
+        +
+        ----
+        output
+        ----
+
+        b. Start the next task.
+        +
+        ----
+        output
+        ----
+
+        c. Verify the result.
+    args: test.adoc
+    requires: asciidoctor
+    exit: 0
+    want: |
+      test.adoc:1:2:Test.Caption:'Valid' in a caption.

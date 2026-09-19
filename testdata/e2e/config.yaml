@@ -1,0 +1,532 @@
+# Configuration semantics, each against a self-contained project.
+name: config
+
+# Every case starts from these two documents, then adds the configuration
+# it needs. Each one runs in a scratch directory built from just these.
+files:
+  test.md: |
+    This is a very important sentence. There is a sentence here too. javascript agendize
+  test.py: |
+    # There is always something to say. Very good! (e.g., this is good)
+    # The centre issue is that everything is going to the center.
+
+cases:
+  - name: level-warning
+    files:
+      .vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = vale
+    args: test.md
+    exit: 0
+    want: |
+      test.md:1:11:vale.Editorializing:Consider removing 'very'
+
+  - name: no-styles-path-builtin
+    files:
+      .vale: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+    args: test.md
+    exit: 1
+    want: |
+      test.md:1:66:Vale.Spelling:Did you really mean 'javascript'?
+      test.md:1:77:Vale.Spelling:Did you really mean 'agendize'?
+
+  - name: no-styles-path-external
+    files:
+      .vale: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale, proselint
+    args: test.md
+    exit: 2
+    contains: |
+      E100 [loadStyles] Runtime error
+
+  - name: level-error
+    files:
+      .vale: |
+        MinAlertLevel = error
+
+        [*]
+        BasedOnStyles = Vale
+
+        Vale.Spelling = NO
+    args: test.md
+    exit: 0
+    want: ""
+
+  - name: styles-format-mismatch
+    files:
+      .vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*.py]
+        BasedOnStyles = vale
+
+        vale.Spelling = NO
+    args: test.md
+    exit: 0
+    want: ""
+
+  - name: styles-per-syntax
+    files:
+      .vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*.md]
+        BasedOnStyles = vale
+
+        vale.Spelling = NO
+
+        [*.py]
+        BasedOnStyles = write-good
+        write-good.E-Prime = NO
+    args: .
+    exit: 1
+    want: |
+      test.md:1:11:vale.Editorializing:Consider removing 'very'
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: checks-per-syntax
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*.md]
+        BasedOnStyles = vale
+
+        vale.Spelling = NO
+
+        [*.py]
+        BasedOnStyles = write-good
+        write-good.E-Prime = NO
+        write-good.Weasel = NO
+    args: .
+    exit: 1
+    want: |
+      test.md:1:11:vale.Editorializing:Consider removing 'very'
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+
+  - name: styles-per-syntax-override
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = vale
+
+        vale.Spelling = NO
+
+        [*.py]
+        BasedOnStyles = write-good
+        write-good.E-Prime = NO
+    args: test.py
+    exit: 1
+    want: |
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: rules-per-syntax-override
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = NO
+
+        [*.py]
+        write-good.Weasel = YES
+    args: test.py test.md
+    exit: 1
+    want: |
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: rules-per-file-override
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = NO
+
+        [test.py]
+        write-good.Weasel = YES
+    args: test.py test.md
+    exit: 1
+    want: |
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: two-base-styles
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = Joblint, write-good
+        write-good.E-Prime = NO
+    args: test.py test.md
+    exit: 1
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+      test.md:1:66:Joblint.TechTerms:Use 'JavaScript' instead of 'javascript'
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: individual-rules
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = vale
+        write-good.ThereIs = YES
+        demo.Spelling = YES
+    args: test.py
+    exit: 1
+    want: |
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:vale.Editorializing:Consider removing 'Very'
+      test.py:2:55:demo.Spelling:Inconsistent spelling of 'center'
+
+  - name: glob-section
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*.{md,py}]
+        BasedOnStyles = vale
+
+        write-good.ThereIs = YES
+        vale.Spelling = NO
+    args: test.py
+    exit: 1
+    want: |
+      test.py:1:3:write-good.ThereIs:Don't start a sentence with 'There is'
+      test.py:1:37:vale.Editorializing:Consider removing 'Very'
+
+  - name: builtin-rule-level
+    files:
+      .vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = error
+
+        [*]
+        vale.Editorializing = error
+    args: test.md
+    exit: 1
+    want: |
+      test.md:1:11:vale.Editorializing:Consider removing 'very'
+
+  - name: external-rule-level
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = error
+
+        [*.{md,py}]
+        write-good.Weasel = error
+    args: test.py
+    exit: 1
+    want: |
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: level-override-suggestion
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+    args: "--minAlertLevel=suggestion test.md"
+    exit: 0
+    want: |
+      test.md:1:6:write-good.E-Prime:Avoid using "is"
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+      test.md:1:42:write-good.E-Prime:Avoid using "is"
+
+  - name: level-override-error
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+    args: "--minAlertLevel=error test.md"
+    exit: 0
+    want: ""
+
+  - name: level-override-none
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+    args: test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: level-per-syntax
+    about: "#965 -- a level set under one section belongs to that section. It
+      used to be collected globally, so the last section in the file decided
+      the level for every format. Here Markdown is downgraded below
+      MinAlertLevel and drops out; HTML, sharing the style, does not."
+    files:
+      test.html: |
+        <p>This is a very important sentence.</p>
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*.{html,md}]
+        BasedOnStyles = write-good
+
+        [*.md]
+        write-good.Weasel = suggestion
+    args: .
+    exit: 0
+    want: |
+      test.html:1:14:write-good.Weasel:'very' is a weasel word!
+
+  - name: level-per-syntax-raised
+    about: "#965 -- and the other direction: Markdown alone is raised to meet
+      MinAlertLevel, so it reports where HTML stays quiet."
+    files:
+      test.html: |
+        <p>This is a very important sentence.</p>
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = error
+
+        [*.{html,md}]
+        BasedOnStyles = write-good
+
+        [*.md]
+        write-good.Weasel = error
+    args: .
+    exit: 1
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: based-on-styles-empty-resets
+    about: an empty BasedOnStyles clears the rule settings a file inherited, not only its styles
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = warning
+
+        [*.py]
+        BasedOnStyles =
+    args: test.py test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: based-on-styles-empty-then-rule
+    about: a rule named after the empty BasedOnStyles still runs
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+
+        [*.py]
+        BasedOnStyles =
+        write-good.Weasel = YES
+    args: test.py
+    exit: 0
+    want: |
+      test.py:1:37:write-good.Weasel:'Very' is a weasel word!
+
+  - name: rule-unset
+    about: UNSET drops an inherited setting, so the rule follows BasedOnStyles again
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        write-good.Weasel = YES
+
+        [*.py]
+        write-good.Weasel = UNSET
+    args: test.py test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: style-unset
+    about: UNSET on a style name drops what an earlier section said about the whole style
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+
+        [*.md]
+        write-good = NO
+
+        [*.md]
+        write-good = UNSET
+    args: test.md
+    exit: 0
+    want: |
+      test.md:1:11:write-good.Weasel:'very' is a weasel word!
+
+  - name: style-unset-keeps-rule-setting
+    about: UNSET on a style leaves a rule-level global setting in place
+    files:
+      _vale: |
+        StylesPath = ../../styles/
+        MinAlertLevel = warning
+
+        [*]
+        BasedOnStyles = write-good
+        write-good.Weasel = NO
+
+        [*.md]
+        write-good = NO
+
+        [*.md]
+        write-good = UNSET
+    args: test.md
+    exit: 0
+    want: ""
+
+  - name: styles-path-not-walked
+    about: a StylesPath holds rules and vocabularies, not prose, so a walk
+      skips it; naming a file inside it still lints that file
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/README.md: |
+        This is a readme with a typpo.
+      docs/page.md: |
+        This page has a typpo.
+    args: .
+    exit: 1
+    want: |
+      docs/page.md:1:17:Vale.Spelling:Did you really mean 'typpo'?
+      test.md:1:66:Vale.Spelling:Did you really mean 'javascript'?
+      test.md:1:77:Vale.Spelling:Did you really mean 'agendize'?
+
+  - name: styles-path-named
+    about: the same project, with the file inside the StylesPath named
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/README.md: |
+        This is a readme with a typpo.
+    args: styles/Demo/README.md
+    exit: 1
+    want: |
+      styles/Demo/README.md:1:11:Vale.Spelling:Did you really mean 'readme'?
+      styles/Demo/README.md:1:25:Vale.Spelling:Did you really mean 'typpo'?
+
+  - name: rule-file-prose-only
+    about: a Vale rule named on the command line is linted by its message and
+      description; its tokens, swaps, and exceptions are patterns, not prose
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      styles/Demo/Rule.yml: |
+        extends: substitution
+        message: "Prefer %s over %s, plaese."
+        description: |
+          A typpo here, and
+          another typpo there.
+        link: https://example.com/optimi[sz]e
+        level: warning
+        swap:
+          teh quick: the quick
+        exceptions:
+          - teh brown
+        tokens:
+          - teh lazy dog
+          - skillz
+    args: styles/Demo
+    exit: 1
+    want: |
+      styles/Demo/Rule.yml:2:30:Vale.Spelling:Did you really mean 'plaese'?
+      styles/Demo/Rule.yml:4:5:Vale.Spelling:Did you really mean 'typpo'?
+      styles/Demo/Rule.yml:5:11:Vale.Spelling:Did you really mean 'typpo'?
+
+  - name: vocab-per-section
+    about: a section's Vocab adds its terms for that section's files only, with
+      Terms and Avoid rules of its own; the top-level Vocab is unchanged
+    files:
+      _vale: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = Base
+
+        [*]
+        BasedOnStyles = Vale
+
+        [api/*.md]
+        Vocab = API
+      styles/config/vocabularies/Base/accept.txt: |
+        Zorbblat
+      styles/config/vocabularies/API/accept.txt: |
+        Quxelate
+        kubectl
+      styles/config/vocabularies/API/reject.txt: |
+        k8s
+      api/page.md: |
+        Run kubectl on Zorbblat with Quxelate, not quxelate or k8s.
+      docs/page.md: |
+        Run kubectl on Zorbblat with Quxelate, not quxelate or k8s.
+    args: api/page.md docs/page.md
+    exit: 1
+    want: |
+      api/page.md:1:44:Vale.API.Terms:Use 'Quxelate' instead of 'quxelate'.
+      api/page.md:1:44:Vale.Spelling:Did you really mean 'quxelate'?
+      api/page.md:1:56:Vale.API.Avoid:Avoid using 'k8s'.
+      docs/page.md:1:5:Vale.Spelling:Did you really mean 'kubectl'?
+      docs/page.md:1:30:Vale.Spelling:Did you really mean 'Quxelate'?
+      docs/page.md:1:44:Vale.Spelling:Did you really mean 'quxelate'?

@@ -4,15 +4,15 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/errata-ai/regexp2"
 	"github.com/mitchellh/mapstructure"
+	rx "github.com/vale-cli/vale/v3/internal/regex"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 type step struct {
-	pattern *regexp2.Regexp
+	pattern *rx.Regexp
 	subs    []string
 }
 
@@ -52,7 +52,10 @@ func NewConsistency(cfg *core.Config, generic baseCheck, path string) (Consisten
 		func() bool { return !rule.Nonword },
 		func() string { return "" }, true)
 
-	chkKey := strings.Split(name, ".")[1]
+	// The capture-group stem is the rule's base name -- the last segment,
+	// since the rule may sit in a subdirectory.
+	parts := strings.Split(name, ".")
+	chkKey := parts[len(parts)-1]
 	count := 0
 	for v1, v2 := range rule.Either {
 		count += 2
@@ -64,7 +67,7 @@ func NewConsistency(cfg *core.Config, generic baseCheck, path string) (Consisten
 		chkRE = fmt.Sprintf("(?P<%s>%s)|(?P<%s>%s)", subs[0], v1, subs[1], v2)
 		chkRE = fmt.Sprintf(regex, chkRE)
 
-		re, errc := regexp2.CompileStd(chkRE)
+		re, errc := rx.Compile(chkRE)
 		if errc != nil {
 			return rule, core.NewE201FromPosition(errc.Error(), path, 1)
 		}
@@ -100,7 +103,14 @@ func (o Consistency) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.
 		if matches != nil && core.AllStringsInSlice(s.subs, f.Sequences) {
 			o.Name = o.Extends
 
-			a, err := makeAlert(o.Definition, loc, txt, cfg)
+			// Not anchored, deliberately. `loc` is whatever the submatch loop
+			// above left behind, which is the *last* match in the block rather
+			// than the one being reported; searching for the matched text
+			// instead lands on the first occurrence, which is what this check
+			// has always reported. Anchoring would promote that leftover into
+			// the output. The rule fires at most once per block, so there is
+			// nothing to gain by it either.
+			a, err := makeAlert(o.Definition, loc, blk, cfg)
 			if err != nil {
 				return alerts, err
 			}

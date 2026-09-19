@@ -3,8 +3,8 @@ package code
 import (
 	"regexp"
 
-	"github.com/errata-ai/vale/v3/internal/core"
 	"github.com/jdkato/go-tree-sitter-julia/julia"
+	"github.com/vale-cli/vale/v3/internal/core"
 )
 
 func Julia() *Language {

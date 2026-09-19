@@ -1,0 +1,390 @@
+# Custom views.
+name: views
+dir: fixtures/views
+
+cases:
+  - name: yaml
+    args: .
+    exit: 1
+    want: |
+      API.yml:3:10:Scopes.Titles:'sample API' should be capitalized
+      API.yml:4:25:Vale.Spelling:Did you really mean 'multiline'?
+      API.yml:9:70:Vale.Spelling:Did you really mean 'serrver'?
+      API.yml:13:24:Vale.Spelling:Did you really mean 'serrver'?
+      API.yml:15:70:Vale.Spelling:Did you really mean 'serrver'?
+      API.yml:20:48:Vale.Spelling:Did you really mean 'servver'?
+      COMMIT_EDITMSG:1:55:Scopes.Subject:A subject line doesn't end with '.'.
+      COMMIT_EDITMSG:3:23:Vale.Spelling:Did you really mean 'occurence'?
+      COMMIT_EDITMSG:6:1:Scopes.Trailer:'Signed-off-by:' isn't a trailer Vale knows.
+      Petstore.yaml:15:18:Vale.Spelling:Did you really mean 'Petstore'?
+      Petstore.yaml:29:28:Vale.Spelling:Did you really mean 'Petstore'?
+      Petstore.yaml:407:17:Vale.Spelling:Did you really mean 'nonintegers'?
+      Rule.yml:3:39:Vale.Repetition:'can' is repeated!
+      ansible.yml:3:13:Scopes.Titles:'reusing Code with Ansible Roles and Coent Collections' should be capitalized
+      ansible.yml:3:31:Vale.Spelling:Did you really mean 'Ansible'?
+      ansible.yml:3:49:Vale.Spelling:Did you really mean 'Coent'?
+      ansible.yml:5:11:Vale.Spelling:Did you really mean 'Ansible'?
+      ansible.yml:5:29:Vale.Spelling:Did you really mean 'Ansible'?
+      ansible.yml:5:60:Vale.Spelling:Did you really mean 'devlop'?
+      ansible.yml:5:103:Vale.Spelling:Did you really mean 'Ansible'?
+      ansible.yml:13:28:Vale.Spelling:Did you really mean 'purose'?
+      ansible.yml:13:41:Vale.Spelling:Did you really mean 'Ansible'?
+      github-workflow.json:18:53:Vale.Spelling:Did you really mean 'pull_request'?
+      github-workflow.json:228:256:Vale.Spelling:Did you really mean 'env'?
+      github-workflow.json:258:83:Vale.Spelling:Did you really mean 'repo'?
+      github-workflow.json:356:53:Vale.Spelling:Did you really mean 'pull_request'?
+      github-workflow.json:497:213:Vale.Spelling:Did you really mean 'INPUT_'?
+      github-workflow.json:543:293:Vale.Spelling:Did you really mean 'prereleased'?
+      github-workflow.json:617:89:Vale.Spelling:Did you really mean 'job_id'?
+      github-workflow.json:717:89:Vale.Spelling:Did you really mean 'job_id'?
+      github-workflow.json:902:164:Vale.Spelling:Did you really mean 'redis'?
+      github-workflow.json:902:618:Vale.Spelling:Did you really mean 'hostname'?
+      github-workflow.json:902:632:Vale.Spelling:Did you really mean 'hostname'?
+      issue1018.yml:3:26:Vale.Spelling:Did you really mean 'misspeling'?
+      issue1018.yml:7:9:Vale.Spelling:Did you really mean 'misspeled'?
+      test.java:13:38:vale.Annotations:'XXX' left in text
+      test.py:1:3:vale.Annotations:'FIXME' left in text
+      test.py:11:3:vale.Annotations:'XXX' left in text
+      test.py:13:16:vale.Annotations:'XXX' left in text
+      test.py:14:14:vale.Annotations:'NOTE' left in text
+      transcript.txt:3:6:Scopes.Assistant:'worth noting' hedges, and this is the model's turn.
+      transcript.txt:3:42:Vale.Spelling:Did you really mean 'occurence'?
+
+  - name: text
+    about: "a `textfsm` view reads plain text through a template and names
+      what it captures. The commit message yields a subject, a body, and
+      trailers, each placed on its own line and column; the transcript
+      exposes only the model's turns, so the misspelling in the user's
+      prompt goes unreported."
+    args: COMMIT_EDITMSG transcript.txt
+    exit: 1
+    want: |
+      COMMIT_EDITMSG:1:55:Scopes.Subject:A subject line doesn't end with '.'.
+      COMMIT_EDITMSG:3:23:Vale.Spelling:Did you really mean 'occurence'?
+      COMMIT_EDITMSG:6:1:Scopes.Trailer:'Signed-off-by:' isn't a trailer Vale knows.
+      transcript.txt:3:6:Scopes.Assistant:'worth noting' hedges, and this is the model's turn.
+      transcript.txt:3:42:Vale.Spelling:Did you really mean 'occurence'?
+    absent:
+      - enuf
+
+  - name: selector-error
+    about: "a selector that fails is reported against the file it was applied
+      to, with the cause from both dasel dialects"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.yml]
+        BasedOnStyles = Chat
+        View = Chat
+      styles/Chat/Hedge.yml: |
+        extends: existence
+        message: "'%s' hedges"
+        level: error
+        scope: assistant
+        tokens:
+          - worth noting
+      styles/config/views/Chat.yml: |
+        engine: dasel
+        scopes:
+          - name: assistant
+            expr: 'messages.filter(role == "assistant").content'
+      chat.yml: |
+        messages:
+          - role: user
+            content: It is worth noting that I asked.
+          - role: assistant
+            content: It is worth noting that I answered.
+    args: chat.yml
+    exit: 2
+    contains: |
+      chat.yml: processing scope "assistant": unexpected type: expected map, got array (as a v2 selector: cannot use property selector on non map/struct types: slice: property not found: role == "assistant")
+
+  - name: selector-filter
+    about: "a filter selects only what it says"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.yml]
+        BasedOnStyles = Chat
+        View = Chat
+      styles/Chat/Hedge.yml: |
+        extends: existence
+        message: "'%s' hedges"
+        level: error
+        scope: assistant
+        tokens:
+          - worth noting
+      styles/config/views/Chat.yml: |
+        engine: dasel
+        scopes:
+          - name: assistant
+            expr: messages.all().filter(equal(role,assistant)).content
+      chat.yml: |
+        messages:
+          - role: user
+            content: It is worth noting that I asked.
+          - role: assistant
+            content: It is worth noting that I answered.
+    args: chat.yml
+    exit: 1
+    want: |
+      chat.yml:5:20:Chat.Hedge:'worth noting' hedges
+
+  - name: presence
+    about: "a value the template never fills is an empty scope at the top of
+      the file, so `occurrence` with `min` reports what is missing and every
+      other rule stays quiet; a Markdown-typed scope is included"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.txt]
+        BasedOnStyles = Need
+        View = Commit
+      styles/config/views/Commit.yml: |
+        engine: textfsm
+        template: |
+          Value Subject (.+)
+          Value List Body (.*)
+          Value List Trailer ((?:BREAKING CHANGE|[A-Z][\w-]+): .+)
+
+          Start
+            ^${Subject} -> Body
+
+          Body
+            ^# -> Next
+            ^${Trailer}
+            ^${Body}
+        scopes:
+          - name: subject
+            expr: Subject
+          - name: body
+            expr: Body
+            type: md
+          - name: trailer
+            expr: Trailer
+      styles/Need/SignedOff.yml: |
+        extends: occurrence
+        message: "A commit needs a Signed-off-by trailer."
+        level: error
+        scope: trailer
+        min: 1
+        token: '^Signed-off-by: '
+      styles/Need/Body.yml: |
+        extends: occurrence
+        message: "A commit needs a body."
+        level: warning
+        scope: body
+        min: 1
+        token: '\S'
+      styles/Need/Hedge.yml: |
+        extends: existence
+        message: "'%s' hedges"
+        level: suggestion
+        scope: body
+        tokens:
+          - worth noting
+      subject-only.txt: |
+        fix: a thing
+      no-body.txt: |
+        fix: a thing
+
+        Signed-off-by: J <j@example.com>
+      complete.txt: |
+        fix: a thing
+
+        It is worth noting.
+
+        Signed-off-by: J <j@example.com>
+    args: subject-only.txt no-body.txt complete.txt
+    exit: 1
+    want: |
+      complete.txt:3:7:Need.Hedge:'worth noting' hedges
+      no-body.txt:1:1:Need.Body:A commit needs a body.
+      subject-only.txt:1:1:Need.Body:A commit needs a body.
+      subject-only.txt:1:1:Need.SignedOff:A commit needs a Signed-off-by trailer.
+
+  - name: any-extension
+    about: "a dasel View applies to whatever file its section matches; a
+      `.log` holding JSON was linted whole, and its selector never ran"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.log]
+        BasedOnStyles = Chat
+        View = Chat
+      styles/Chat/Hedge.yml: |
+        extends: existence
+        message: "'%s' hedges"
+        level: error
+        tokens:
+          - worth noting
+      styles/config/views/Chat.yml: |
+        engine: dasel
+        scopes:
+          - name: assistant
+            expr: all().filter(equal(role,assistant)).content
+      chat.log: |
+        [{"role":"user","content":"It is worth noting that I asked."},{"role":"assistant","content":"It is worth noting that I answered."}]
+    args: chat.log
+    exit: 1
+    want: |
+      chat.log:1:100:Chat.Hedge:'worth noting' hedges
+
+  - name: any-extension-error
+    about: "and a selector that fails on such a file is reported, not skipped"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.log]
+        BasedOnStyles = Chat
+        View = Chat
+      styles/Chat/Hedge.yml: |
+        extends: existence
+        message: "'%s' hedges"
+        level: error
+        tokens:
+          - worth noting
+      styles/config/views/Chat.yml: |
+        engine: dasel
+        scopes:
+          - name: assistant
+            expr: this.is.not.valid.[[[
+      chat.log: |
+        [{"role":"user","content":"It is worth noting that I asked."}]
+    args: chat.log
+    exit: 2
+    contains: |
+      chat.log: processing scope "assistant": unexpected type: expected map, got array
+
+  - name: across-values
+    about: "a fact about a line is a value for that line, and a `conditional`
+      with `in` looks for its consequent in another of the View's scopes"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.txt]
+        BasedOnStyles = Conv
+        View = Commit
+      styles/config/views/Commit.yml: |
+        engine: textfsm
+        template: |
+          Value Subject (.+)
+          Value Gap (.*)
+          Value List Body (.*)
+          Value List Trailer ((?:BREAKING CHANGE|[A-Z][\w-]+): .+)
+
+          Start
+            ^${Subject} -> Gap
+
+          Gap
+            ^${Gap} -> Body
+
+          Body
+            ^# -> Next
+            ^${Trailer}
+            ^${Body}
+        scopes:
+          - name: subject
+            expr: Subject
+          - name: gap
+            expr: Gap
+          - name: body
+            expr: Body
+          - name: trailer
+            expr: Trailer
+      styles/Conv/LeadingBlank.yml: |
+        extends: existence
+        message: "The body must be separated from the subject by a blank line."
+        level: error
+        scope: gap
+        nonword: true
+        raw:
+          - '\A\S'
+      styles/Conv/BreakingFooter.yml: |
+        extends: conditional
+        message: "A '!' in the subject needs a 'BREAKING CHANGE:' footer."
+        level: error
+        scope: subject
+        first: '^\w+(?:\([^)]*\))?!:'
+        second: '^BREAKING CHANGE: '
+        in: trailer
+      styles/Conv/BreakingBang.yml: |
+        extends: conditional
+        message: "A 'BREAKING CHANGE:' footer needs a '!' in the subject."
+        level: error
+        scope: trailer
+        first: '^BREAKING CHANGE: '
+        second: '^\w+(?:\([^)]*\))?!:'
+        in: subject
+      marked.txt: |
+        feat!: drop the flag
+
+        The flag is gone.
+
+        BREAKING CHANGE: the flag is gone
+      unmarked.txt: |
+        feat!: drop the flag
+
+        The flag is gone.
+      unflagged.txt: |
+        feat: drop the flag
+
+        BREAKING CHANGE: the flag is gone
+      crowded.txt: |
+        feat: add a thing
+        The body starts too soon.
+      plain.txt: |
+        feat: add a thing
+    args: marked.txt unmarked.txt unflagged.txt crowded.txt plain.txt
+    exit: 1
+    want: |
+      crowded.txt:2:1:Conv.LeadingBlank:The body must be separated from the subject by a blank line.
+      unflagged.txt:3:1:Conv.BreakingBang:A 'BREAKING CHANGE:' footer needs a '!' in the subject.
+      unmarked.txt:1:1:Conv.BreakingFooter:A '!' in the subject needs a 'BREAKING CHANGE:' footer.
+
+  - name: across-values-unknown
+    about: "an `in` that no View defines is an error at load"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.txt]
+        BasedOnStyles = Conv
+        View = Commit
+      styles/config/views/Commit.yml: |
+        engine: textfsm
+        template: |
+          Value Subject (.+)
+
+          Start
+            ^${Subject}
+        scopes:
+          - name: subject
+            expr: Subject
+      styles/Conv/Breaking.yml: |
+        extends: conditional
+        message: "needs a footer"
+        level: error
+        scope: subject
+        first: '!:'
+        second: '^BREAKING CHANGE: '
+        in: trailer
+      plain.txt: |
+        feat: add a thing
+    args: plain.txt
+    exit: 2
+    contains: |
+      no View defines a scope named 'trailer'

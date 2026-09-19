@@ -1,0 +1,303 @@
+# `vale off` / `vale on` comments, per format.
+name: comments
+dir: fixtures/comments
+
+cases:
+  - name: mdx
+    args: test.mdx
+    exit: 1
+    want: |
+      test.mdx:15:19:vale.Redundancy:'ACT test' is redundant
+      test.mdx:19:19:vale.Redundancy:'ACT test' is redundant
+      test.mdx:25:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.mdx:77:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: mdx-config
+    args: test2.mdx
+    exit: 1
+    want: |
+      test2.mdx:15:19:vale.Redundancy:'ACT test' is redundant
+      test2.mdx:19:19:vale.Redundancy:'ACT test' is redundant
+      test2.mdx:25:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test2.mdx:77:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: markdown
+    args: test.md
+    exit: 1
+    want: |
+      test.md:23:19:vale.Redundancy:'ACT test' is redundant
+      test.md:33:19:vale.Redundancy:'ACT test' is redundant
+      test.md:37:19:vale.Redundancy:'ACT test' is redundant
+      test.md:43:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:95:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:109:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:111:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:121:19:vale.Redundancy:'ACT test' is redundant
+      test.md:127:19:vale.Redundancy:'ACT test' is redundant
+      test.md:127:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:129:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:133:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:135:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:145:19:vale.Redundancy:'ACT test' is redundant
+      test.md:151:19:vale.Redundancy:'ACT test' is redundant
+      test.md:151:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:153:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:157:19:vale.Redundancy:'ACT test' is redundant
+      test.md:163:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:165:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.md:169:19:vale.Redundancy:'ACT test' is redundant
+      test.md:169:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.md:171:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: rst
+    args: test.rst
+    requires: rst2html
+    exit: 1
+    want: |
+      test.rst:15:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:19:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:25:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:41:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:43:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:53:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:59:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:59:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:61:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:65:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:67:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:77:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:83:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:83:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:85:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:89:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:95:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:97:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+      test.rst:101:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:101:48:demo.Ending-Preposition:Don't end a sentence with 'for.'
+      test.rst:103:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: asciidoc
+    args: test.adoc
+    requires: asciidoctor
+    exit: 1
+    want: |
+      test.adoc:15:19:vale.Redundancy:'ACT test' is redundant
+      test.adoc:19:19:vale.Redundancy:'ACT test' is redundant
+      test.adoc:25:20:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: org
+    args: test.org
+    exit: 1
+    want: |
+      test.org:17:21:vale.Redundancy:'ACT test' is redundant
+
+  - name: inline-vale-off
+    about: "#1001"
+    args: issue1001.md
+    exit: 0
+    want: |
+      issue1001.md:5:28:demo.Ending-Preposition:Don't end a sentence with 'of.'
+
+  - name: inline-comment-spacing
+    about: "#882 -- text after a comment keeps its own leading space instead of
+      fusing with the text before it; inside a still-open inline element the
+      opening tag stays the boundary, so `sona` isn't fused into `sonata`"
+    args: issue882.md
+    exit: 1
+    want: |
+      issue882.md:4:3:Vale.Spelling:Did you really mean 'sona'?
+
+  - name: inline-comment-keeps-space
+    about: "A comment is masked out of its paragraph. The whitespace the
+      source put before it still separates the words on either side, so
+      `firstt, <!-- c -->then` reads as `firstt, then`, not `firstt,then`."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        Prose firstt, <!-- note -->then a commentt mid-line.
+
+        Prose secondd <!-- note --> then a commentt.
+
+        Prose thirdd <!-- note -->then.
+
+        Prose fourthh<!-- note --> then.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:7:Vale.Spelling:Did you really mean 'firstt'?
+      test.md:1:35:Vale.Spelling:Did you really mean 'commentt'?
+      test.md:3:7:Vale.Spelling:Did you really mean 'secondd'?
+      test.md:3:36:Vale.Spelling:Did you really mean 'commentt'?
+      test.md:5:7:Vale.Spelling:Did you really mean 'thirdd'?
+      test.md:7:7:Vale.Spelling:Did you really mean 'fourthh'?
+
+  - name: mdx-repeated-text-in-off-region
+    about: "#1032 -- the same paragraph repeated inside a vale-off region
+      and inside code fences. A block's later matches used to be located
+      in the next copy of its text, since the earlier matches had been
+      masked out of the block, which put them outside the region."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+
+        {/* vale off */}
+
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+
+        {/* vale on */}
+
+        {/* vale off */}
+        ```
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+
+        {/* vale off */}
+        ```shell
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+
+        {/* vale off */}
+        ```shell {2,4} mark="determine"
+        owner: Could not determine whether revision 1 is supported, assuming it is.
+        iptables v1.8.9 (legacy): can't initialize iptables table `raw': Permission denied.
+        Perhaps iptables or your kernel needs to be upgraded.
+        ```
+        {/* vale on */}
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:2:1:Vale.Spelling:Did you really mean 'iptables'?
+      test.mdx:2:44:Vale.Spelling:Did you really mean 'iptables'?
+      test.mdx:3:9:Vale.Spelling:Did you really mean 'iptables'?
+
+  - name: off-region-after-imports
+    about: "#1073 -- ESM import lines before a vale-off region, holding
+      `@` and quotes, and a paragraph of imports inside it. The region
+      used to be missed, and a term inside an import path was reported."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = P
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/P/accept.txt: |
+        PR
+      test.md: |
+        ---
+        title: Azure PR comments
+        ---
+
+        import Tabs from '@theme/Tabs';
+        import TabItem from '@theme/TabItem';
+
+        <!-- vale off -->
+
+        import CustomComments from "/src/components/procedure/_customize_pr_mr_comments.mdx"
+        import DeploymentJourney from "/src/components/concept/_deployment-journey.mdx"
+        import PL from '@site/src/components/Placeholder';
+
+        <!-- vale on -->
+
+        ## Azure PR comments
+
+        More prose about a pr after.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:18:20:Vale.Terms:Use 'PR' instead of 'pr'.
+
+  - name: footnote-in-off-region
+    about: "#1078 -- a footnote's text renders at the end of the document,
+      after every comment, so a vale-off toggle read in document order had
+      already been turned back on. The toggle is also a region, so the
+      footnote is judged by where it is written."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = T
+      styles/T/Annotations.yml: |
+        extends: existence
+        message: "'%s' left in text."
+        level: error
+        tokens:
+          - TODO
+      test.md: |
+        Text with a footnote[^note] and a TODO here.
+
+        <!-- vale off -->
+
+        [^note]: There is a group called the [TODO Group](https://todogroup.org/).
+
+        <!-- vale on -->
+
+        More text with a TODO that should be reported.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:35:T.Annotations:'TODO' left in text.
+      test.md:9:18:T.Annotations:'TODO' left in text.
+
+  - name: rst-promoted-title-in-off-region
+    about: "#340 -- rst2html promotes a lone top-level section title to the
+      document title and emits it before the comments that precede it in
+      the source. The comment's position is searched for from the last
+      comment, not from the block cursor, so the region still begins at
+      the comment."
+    requires: rst2html
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.rst]
+        BasedOnStyles = T
+      styles/T/Words.yml: |
+        extends: substitution
+        message: "Use '%s' instead of '%s'."
+        level: error
+        swap:
+          text: words
+      test.rst: |
+        .. vale off
+
+        this text should be fine
+        ------------------------
+
+        .. vale on
+
+        This text should be flagged.
+
+        .. vale off
+
+        this text should be fine
+
+        .. vale on
+    args: --output=line --no-exit test.rst
+    exit: 0
+    want: |
+      test.rst:8:6:T.Words:Use 'words' instead of 'text'.

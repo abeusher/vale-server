@@ -1,0 +1,10 @@
+# The right-hand mirror: a trailing negated token is satisfied by the end of
+# the sentence.
+extends: sequence
+message: 'Bare stop.'
+level: error
+ignorecase: true
+tokens:
+  - pattern: 'stop'
+  - tag: 'IN'
+    negate: true

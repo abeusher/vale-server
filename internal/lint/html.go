@@ -6,10 +6,10 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/errata-ai/regexp2"
+	rx "github.com/vale-cli/vale/v3/internal/regex"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/glob"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/glob"
 )
 
 var reFrontMatter = regexp.MustCompile(
@@ -21,18 +21,51 @@ func (l *Linter) lintHTML(f *core.File) error {
 	if l.Manager.Config.Flags.Built != "" {
 		return l.lintTxtToHTML(f)
 	}
-	return l.lintHTMLTokens(f, []byte(f.Content), 0)
+
+	s, err := l.Transform(f)
+	if err != nil {
+		return err
+	}
+
+	return l.lintHTMLTokens(f, []byte(s), 0)
 }
 
 type extensionConfig struct {
-	Normed, Real string
+	// Normed is the format the file is read as, which selects the parser and
+	// the delimiters below. Real is its extension on disk, and RealPath its
+	// path.
+	Normed, Real, RealPath string
 }
 
+// match reports whether a config section applies to this file.
+//
+// Sections are keyed on the file as it is on disk -- `[*.qmd]`, never `[*.md]`
+// by way of `[formats] qmd = md` -- which is how `BasedOnStyles` matches, and
+// the two have to agree: patterns that ignored text no rule was going to reach
+// would be pointless, and the reverse silently lints what the section says to
+// skip.
+//
+// The path is matched as well as the extension. Without it a section keyed on
+// one -- `[docs/*.md]` -- could never match, and its patterns were read,
+// compiled and then silently never applied. See #839.
+func (e extensionConfig) match(sec glob.Glob) bool {
+	return sec.Match(e.Real) || (e.RealPath != "" && sec.Match(e.RealPath))
+}
+
+// blockDelimiters wrap a BlockIgnores match in the format's block code
+// delimiter. HTML has no source-level one, so a match is wrapped in the
+// element the others are converted to.
 var blockDelimiters = map[string]string{
 	".adoc": "\n----\n$1\n----\n",
+	".dita": "<codeblock>$1</codeblock>",
+	".html": "<pre>$1</pre>",
 	".md":   "\n```\n$1\n```\n",
 	".mdx":  "\n```\n$1\n```\n",
+	".myst": "\n```\n$1\n```\n",
+	".qdoc": "\n\\code\n$1\n\\endcode\n",
+	".qmd":  "\n```\n$1\n```\n",
 	".rst":  "\n::\n\n%s\n",
+	".typ":  "\n```\n$1\n```\n",
 	".org":  orgExample,
 }
 
@@ -49,9 +82,9 @@ func applyBlockPatterns(c *core.Config, exts extensionConfig, content string) (s
 		sec, err := glob.Compile(syntax)
 		if err != nil {
 			return s, err
-		} else if sec.Match(exts.Normed) || sec.Match(exts.Real) {
+		} else if exts.match(sec) {
 			for _, r := range regexes {
-				pat, errc := regexp2.CompileStd(r)
+				pat, errc := rx.Compile(r)
 				if errc != nil { //nolint:gocritic
 					return s, core.NewE201FromTarget(
 						errc.Error(),
@@ -82,9 +115,15 @@ func applyBlockPatterns(c *core.Config, exts extensionConfig, content string) (s
 
 var inlineDelimiters = map[string]string{
 	".adoc": "`$1`",
+	".dita": "<codeph>$1</codeph>",
+	".html": "<code>$1</code>",
 	".md":   "`$1`",
 	".mdx":  "`$1`",
+	".myst": "`$1`",
+	".qdoc": `\c {$1}`,
+	".qmd":  "`$1`",
 	".rst":  "``$1``",
+	".typ":  "`$1`",
 	".org":  "=$1=",
 }
 
@@ -98,9 +137,9 @@ func applyInlinePatterns(c *core.Config, exts extensionConfig, content string) (
 		sec, err := glob.Compile(syntax)
 		if err != nil {
 			return content, err
-		} else if sec.Match(exts.Normed) || sec.Match(exts.Real) {
+		} else if exts.match(sec) {
 			for _, r := range regexes {
-				pat, errc := regexp2.CompileStd(r)
+				pat, errc := rx.Compile(r)
 				if errc != nil {
 					return content, core.NewE201FromTarget(
 						errc.Error(),
@@ -130,7 +169,7 @@ func applyCommentPatterns(c *core.Config, exts extensionConfig, content string) 
 		sec, err := glob.Compile(syntax)
 		if err != nil {
 			return content, err
-		} else if sec.Match(exts.Normed) || sec.Match(exts.Real) {
+		} else if exts.match(sec) {
 			// This field was not assigned, so do nothing.
 			if delims[0] == "" && delims[1] == "" {
 				return content, nil

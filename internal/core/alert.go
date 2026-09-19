@@ -19,6 +19,8 @@ type Action struct {
 // An Alert represents a potential error in prose.
 type Alert struct {
 	Action         Action   // a possible solution
+	Suggestions    []string // what Action resolves to, when known at lint time
+	Groups         []string `json:",omitempty"` // the matched token's capture groups
 	Span           []int    // the [begin, end] location within a line
 	Offset         []string `json:"-"` // tokens to ignore before this match
 	Check          string   // the name of the check
@@ -31,6 +33,11 @@ type Alert struct {
 	Limit          int      `json:"-"` // the max times to report
 	Hide           bool     `json:"-"` // should we hide this alert?
 	HasByteOffsets bool     `json:"-"` // Span holds byte offsets into the raw document
+
+	// skipOcc is how many acceptable occurrences of Match precede this one
+	// within its block, so the locate-by-search can skip exactly that many
+	// rather than land on the first.
+	skipOcc int
 }
 
 // FormatAlert ensures that all required fields have data.
@@ -43,6 +50,9 @@ func FormatAlert(a *Alert, limit int, level, name string) {
 	}
 	a.Limit = limit
 	a.Message = WhitespaceToSpace(a.Message)
+	if a.Suggestions == nil {
+		a.Suggestions = []string{}
+	}
 }
 
 // ByPosition sorts Alerts by line and column.

@@ -41,7 +41,19 @@ func newSplitter(chars string) *splitter {
 }
 
 func isNumber(s string) bool {
-	return numberRegexp.MatchString(s)
+	if numberRegexp.MatchString(s) {
+		return true
+	}
+	// Digits in any script: ۱۲۳.
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
 }
 
 func isNumberBinary(s string) bool {

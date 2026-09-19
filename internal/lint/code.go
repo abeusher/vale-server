@@ -7,16 +7,21 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/glob"
-	"github.com/errata-ai/vale/v3/internal/lint/code"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/glob"
+	"github.com/vale-cli/vale/v3/internal/lint/code"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 func updateQueries(f *core.File, views map[string]*core.View) ([]core.Scope, error) {
 	var found []core.Scope
 
 	for syntax, view := range views {
+		if view.Engine != "tree-sitter" {
+			// A data View's selectors are not queries; it reads the file
+			// itself, and may hand a cell of it here as code.
+			continue
+		}
 		sec, err := glob.Compile(syntax)
 		if err != nil {
 			return nil, err
@@ -28,13 +33,24 @@ func updateQueries(f *core.File, views map[string]*core.View) ([]core.Scope, err
 	return found, nil
 }
 
+// skipsComment reports whether `IgnoredScopes` excludes a comment of this
+// scope -- `text.comment.block` for a Python docstring, say.
+//
+// Both paths that read comments consult this. Which one runs depends on
+// whether a markup format is mapped onto the file, and asking for Markdown in
+// your comments must not also cost you the ability to exclude one. See #858.
+func (l *Linter) skipsComment(scope string) bool {
+	ignored := l.Manager.Config.IgnoredScopes
+	return core.StringInSlice("comment", ignored) ||
+		core.StringInSlice(scope, ignored)
+}
+
 func (l *Linter) lintCode(f *core.File) error {
 	lang, err := code.GetLanguageFromExt(f.RealExt)
 	if err != nil {
 		// No tree-sitter grammar available for this file type.
 		return l.lintCodeOld(f)
 	}
-	ignored := l.Manager.Config.IgnoredScopes
 
 	found, err := updateQueries(f, l.Manager.Config.Views)
 	if err != nil {
@@ -49,15 +65,13 @@ func (l *Linter) lintCode(f *core.File) error {
 	}
 	wholeFile := f.Content
 
-	last := 0
+	last := len(f.Alerts) // the file may hold alerts from cells before this one
 	for _, comment := range comments {
-		l.SetMetaScope(comment.Scope)
-		if core.StringInSlice("comment", ignored) {
-			continue
-		} else if core.StringInSlice(comment.Scope, ignored) {
+		f.SetMetaScope(comment.Scope)
+		if l.skipsComment(comment.Scope) {
 			continue
 		}
-		f.SetText(comment.Text)
+		f.SetText(maskURLs(comment.Text))
 
 		err = l.lintLines(f)
 		if err != nil {
@@ -78,6 +92,16 @@ func (l *Linter) lintCode(f *core.File) error {
 // lintCodeOld lints source code by analyzing its comments.
 //
 // Deprecated: we now use tree-sitter to parse code and collect comments.
+// urlRE matches a URL in a comment, up to the punctuation that would
+// close a sentence or a bracket around it.
+var urlRE = regexp.MustCompile(`\b(?:https?|ftp)://[^\s<>"'` + "`" + `)\]]*[^\s<>"'` + "`" + `)\].,;:!?]`)
+
+// maskURLs blanks the URLs in a comment: a URL is never prose, and in
+// markup the converter keeps one out of the text already.
+func maskURLs(s string) string {
+	return urlRE.ReplaceAllStringFunc(s, nlp.BlankRunes)
+}
+
 func (l *Linter) lintCodeOld(f *core.File) error {
 	var line, match, txt string
 	var lnLength, padding int
@@ -115,6 +139,7 @@ func (l *Linter) lintCodeOld(f *core.File) error {
 				block.WriteString(line)
 				txt = block.String()
 
+				txt = maskURLs(txt)
 				b := nlp.NewBlock(
 					txt, txt, fmt.Sprintf(scope, "text.comment.block"))
 				if !(skipAll || skipBlock) {
@@ -134,6 +159,7 @@ func (l *Linter) lintCodeOld(f *core.File) error {
 			// 'print("foo") # ...' will be condensed to '# ...'.
 			padding = lnLength - len(match)
 
+			match = maskURLs(match)
 			b := nlp.NewBlock(
 				match, match, fmt.Sprintf(scope, "text.comment.line"))
 			if !(skipAll || skipInline) {

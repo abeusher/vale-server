@@ -8,7 +8,7 @@ import (
 
 	"github.com/pterm/pterm"
 
-	"github.com/errata-ai/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/core"
 )
 
 // Response is returned after an action.

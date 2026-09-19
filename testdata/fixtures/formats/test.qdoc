@@ -1,0 +1,123 @@
+/*!
+    \page overview.html
+    \title A page title with a TODO in it
+
+    \brief The brief has an XXX in it.
+
+    Body prose with a TODO in it, and a \l {FIXME-target} {link text with
+    an XXX in it} for more.
+
+    \section1 A section heading with a TODO in it
+
+    Use the \c FIXME class with the \a FIXME argument.
+
+    See \b {bold prose with an XXX in it} and \e {some emphasized prose} here.
+
+    \list
+        \li A list item with a TODO in it.
+        \li A second item.
+    \endlist
+
+    \code
+        int x = 0;  // a FIXME in code
+    \endcode
+
+    \note A note with an XXX in it.
+
+    \table
+        \header
+            \li Name
+            \li A header cell with an XXX in it
+        \row
+            \li \c FIXME
+            \li A body cell with a TODO in it.
+    \endtable
+
+    \value FIRST An enum description with an XXX in it.
+
+    \image diagram-FIXME.png A caption with a TODO in it.
+
+    \omit
+        Omitted prose, FIXME and all.
+    \endomit
+
+    \sa FIXME, QObject
+*/
+
+/*! \page conditional.html
+    \title A second title with a TODO in it
+
+    \qmlenum Mode
+    \qmlsingletontype FIXME
+    \typealias FIXME
+    \nativetype FIXME
+    \cmakepackage FIXME
+    \cmakecomponent FIXME
+    \cmaketargetitem FIXME
+    \qtcmakepackage FIXME
+    \qtcmaketargetitem FIXME
+    \qtvariable FIXME
+    \tableofcontents FIXME
+    \dontdocument (FIXME)
+
+    \compareswith equality FIXME
+    \endcompareswith
+
+    \if defined(FIXME)
+    A conditional paragraph with an XXX in it.
+    \else
+    Another branch with a TODO in it.
+    \endif
+
+    A literal backslash \\c is not a command, and \unicode 0x2022 is a
+    character. \span {class="FIXME"} {Spanned prose with an XXX in it.}
+*/
+
+/*!
+    \page modifiers.html
+    \subtitle A subtitle with a TODO in it
+
+    \abstract
+    \readonly
+    \required
+    \preliminary
+    \qmlabstract
+    \qmldefault
+    \qmlenumeratorsfrom FIXME
+    \omitvalue FIXME
+    \modulestate {FIXME}
+    \notranslate
+    \compares FIXME
+    \default FIXME
+    \inheaderfile FIXME
+    \attribution FIXME
+    \toc
+    \tocentry FIXME
+
+    \deprecated [FIXME] Use the replacement with an XXX in it.
+
+    \details {A summary with a TODO in it.}
+    Body prose with an XXX in it.
+    \enddetails
+
+    \table
+        \row
+            \li {2,1} A spanned cell that keeps its TODO.
+    \endtable
+
+    Use \bold {bold prose with an XXX in it} and \i {emphasis with a TODO}.
+*/
+
+/*!
+//! [intro]
+    A snippet marker holds no prose, and no TODO of its own.
+//! [intro]
+
+    \image screenshot-FIXME.png A caption with an XXX in it.
+*/
+
+/*!
+    Include it with a <script> tag, and the TODO after it still counts.
+
+    Prose in a later paragraph keeps its XXX.
+*/

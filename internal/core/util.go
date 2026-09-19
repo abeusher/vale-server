@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 var defaultIgnoreDirectories = []string{
@@ -19,6 +19,38 @@ var sanitizer = strings.NewReplacer(
 	"&rsquo;", "'",
 	"\r\n", "\n",
 	"\r", "\n")
+
+// rsquoShift is how many bytes the sanitizer removes per `&rsquo;` rewrite.
+const rsquoShift = len("&rsquo;") - len("'")
+
+// findShifts records, per 1-based line, the rune column (in Sanitize's
+// output) of each rewrite that shortened the text, so a reported span can be
+// mapped back to the file's actual bytes. Only `&rsquo;` changes a line's
+// width -- the line-ending rewrites don't move columns.
+func findShifts(raw string) map[int][]int {
+	if !strings.Contains(raw, "&rsquo;") {
+		return nil
+	}
+
+	shifts := make(map[int][]int)
+	for i, line := range strings.Split(raw, "\n") {
+		at := 0
+		for {
+			j := strings.Index(line[at:], "&rsquo;")
+			if j < 0 {
+				break
+			}
+			at += j
+
+			col := nlp.StrLen(Sanitize(line[:at])) + 1
+			shifts[i+1] = append(shifts[i+1], col)
+
+			at += len("&rsquo;")
+		}
+	}
+
+	return shifts
+}
 
 // CapFirst capitalizes the first letter of a string.
 func CapFirst(s string) string {
@@ -168,6 +200,45 @@ func Indent(text, indent string) string {
 		result += indent + j + "\n"
 	}
 	return result[:len(result)-1]
+}
+
+// StyleName returns the style a rule belongs to -- `proselint` for
+// `proselint.Typography`.
+//
+// A config may name either, so that a setting can be given once for a style and
+// then overridden for a rule within it.
+// CheckName derives a rule's name from where it sits under its style root:
+// the directory's base, then each subdirectory, then the file's base, joined
+// with dots. `Std/dates/TimeFormat.yml` is `Std.dates.TimeFormat` -- the tree
+// is part of the name, so organizing a style never silently renames or drops
+// a rule, and disabling one names the path you see on disk.
+//
+// The file's base keeps its historical reading: everything before the first
+// dot. `Terms.custom.yml` has always loaded as `Terms`.
+func CheckName(styleRoot, rulePath string) (string, error) {
+	rel, err := filepath.Rel(styleRoot, rulePath)
+	if err != nil {
+		return "", err
+	}
+
+	parts := strings.Split(filepath.ToSlash(rel), "/")
+	base := strings.Split(parts[len(parts)-1], ".")[0]
+	parts[len(parts)-1] = base
+
+	name := filepath.Base(styleRoot) + "." + strings.Join(parts, ".")
+	if strings.ContainsAny(name, "[]") {
+		// `Style.Rule[param]` is configuration syntax; a name holding
+		// brackets would make every such key ambiguous.
+		return "", fmt.Errorf("'%s' contains brackets, which rule names cannot", name)
+	}
+	return name, nil
+}
+
+func StyleName(rule string) string {
+	if style, _, found := strings.Cut(rule, "."); found {
+		return style
+	}
+	return rule
 }
 
 // StringInSlice determines if `slice` contains the string `a`.

@@ -2,7 +2,7 @@ package main
 
 import "encoding/json"
 
-var library = "https://raw.githubusercontent.com/errata-ai/styles/master/library.json"
+var library = "https://raw.githubusercontent.com/vale-cli/packages/master/library.json"
 
 func getLibrary(_ string) ([]Style, error) {
 	styles := []Style{}

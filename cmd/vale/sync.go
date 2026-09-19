@@ -8,8 +8,8 @@ import (
 
 	cp "github.com/otiai10/copy"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
 func initPath(cfg *core.Config) error {
@@ -85,7 +85,36 @@ func download(name, url, styles string, index int) error {
 	return installPkg(dir, name, styles, index)
 }
 
+// pkgRoot returns the entry in dir that holds the package named name: an
+// exact match, or failing that one that differs only in case.
+//
+// A remote package is named after its URL, and GitHub serves a release asset
+// under any casing of its name, so the directory inside the archive may not
+// match. See #1181.
+func pkgRoot(dir, name string) string {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return name
+	}
+
+	for _, entry := range entries {
+		if entry.Name() == name {
+			return name
+		}
+	}
+
+	for _, entry := range entries {
+		if strings.EqualFold(entry.Name(), name) {
+			return entry.Name()
+		}
+	}
+
+	return name
+}
+
 func installPkg(dir, name, styles string, index int) error {
+	name = pkgRoot(dir, name)
+
 	root := filepath.Join(dir, name)
 	path := filepath.Join(root, "styles")
 	pipe := filepath.Join(styles, core.PipeDir)
@@ -128,12 +157,20 @@ func installPkg(dir, name, styles string, index int) error {
 				return err
 			}
 		}
-		entry := fmt.Sprintf("%d-%s.ini", index, name)
-
-		err = os.Rename(cfg, filepath.Join(root, entry))
-		if err != nil {
+		// Copy the package's .vale.ini into the pipeline directory under its
+		// indexed name. We must not rename it in place: for a local directory
+		// package, `root` is the user's actual source directory, so renaming
+		// would clobber their original .vale.ini. See #991 (and #583).
+		dst := filepath.Join(pipe, fmt.Sprintf("%d-%s.ini", index, name))
+		if system.FileExists(dst) {
+			if err = os.RemoveAll(dst); err != nil {
+				return err
+			}
+		}
+		if err = os.MkdirAll(pipe, os.ModePerm); err != nil {
 			return err
-		} else if err = moveAsset(entry, root, pipe); err != nil {
+		}
+		if err = cp.Copy(cfg, dst); err != nil {
 			return err
 		}
 	}

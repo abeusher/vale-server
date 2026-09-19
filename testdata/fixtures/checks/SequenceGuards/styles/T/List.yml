@@ -1,0 +1,24 @@
+# A miniature serial-comma rule: a list of nouns, not preceded by a
+# conjunction (pair-lists like 'trauma or abuse, fear or anxiety' aren't
+# lists of three), and not beginning inside a fronted phrase. `target`
+# keeps the guard word out of the alert span, so the exception judges the
+# list's own position rather than the consumed word before it.
+extends: sequence
+message: 'Missing serial comma.'
+level: error
+ignorecase: true
+exceptions:
+  - '^(?i:(?:in|on|when|while|if)\b[^,]{0,60}),'
+tokens:
+  - tag: 'CC'
+    negate: true
+  - tag: 'NNP?S?'
+    target: true
+  - tag: ','
+    target: true
+  - tag: 'NNP?S?'
+    target: true
+  - pattern: '(?:and|or)'
+    target: true
+  - tag: 'DT|JJ[RS]?|NNP?S?|VBG|CD'
+    target: true

@@ -7,12 +7,12 @@ import (
 
 	"github.com/adrg/frontmatter"
 
-	"github.com/errata-ai/vale/v3/internal/check"
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/check"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
-func (l Linter) lintMetadata(f *core.File) error {
+func (l *Linter) lintMetadata(f *core.File) error {
 	metadata := make(map[string]any)
 
 	body, err := frontmatter.Parse(strings.NewReader(f.Content), &metadata)
@@ -28,6 +28,11 @@ func (l Linter) lintMetadata(f *core.File) error {
 	}
 
 	ignored := check.NewScope(l.Manager.Config.IgnoredScopes)
+	if !strings.HasPrefix(strings.TrimSpace(fm), "+++") {
+		return l.lintFrontMatterValues(f, fm, ignored)
+	}
+
+	// TOML front matter is placed by searching for each value.
 	for key, value := range metadata {
 		if s, ok := value.(string); ok {
 			i, _ := findBestLineBySubstring(fm, s)
@@ -49,6 +54,30 @@ func (l Linter) lintMetadata(f *core.File) error {
 	}
 
 	return nil
+}
+
+// lintFrontMatterValues lints YAML or JSON front matter field by field,
+// each placed by its scalar's position rather than by a text search, which
+// found a value inside an earlier field that shared its prefix.
+func (l *Linter) lintFrontMatterValues(f *core.File, fm string, ignored check.Scope) error {
+	values, err := core.FrontMatterValues(fm, strings.Split(f.Content, "\n"))
+	if err != nil {
+		return core.NewE201FromPosition(err.Error(), f.Path, 1)
+	}
+
+	kept := values[:0]
+	for _, v := range values {
+		if !ignored.Matches(nlp.Block{Scope: "text." + v.Scope + f.RealExt}) {
+			kept = append(kept, v)
+		}
+	}
+
+	// The values are linted in the file's place; the body follows, so what
+	// they change is put back.
+	normed, meta := f.NormedExt, f.MetaScope
+	err = l.lintScopedValues(f, kept)
+	f.NormedExt, f.MetaScope = normed, meta
+	return err
 }
 
 func extractFrontMatter(file, body string) (string, error) {

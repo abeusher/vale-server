@@ -1,0 +1,314 @@
+# Markup that the parsers have to normalize before checks run.
+name: patterns
+dir: fixtures/patterns
+
+cases:
+  - name: mdx
+    args: test.mdx
+    exit: 0
+    want: |
+      test.mdx:1:19:vale.Redundancy:'ACT test' is redundant
+      test.mdx:7:19:vale.Redundancy:'ACT test' is redundant
+      test.mdx:17:1:vale.Redundancy:'ACT test' is redundant
+
+  - name: markdown
+    args: test.md
+    exit: 0
+    want: |
+      test.md:1:19:vale.Redundancy:'ACT test' is redundant
+      test.md:7:19:vale.Redundancy:'ACT test' is redundant
+      test.md:17:1:vale.Redundancy:'ACT test' is redundant
+
+  - name: asciidoc
+    args: test.adoc
+    requires: asciidoctor
+    exit: 0
+    want: |
+      test.adoc:1:19:vale.Redundancy:'ACT test' is redundant
+      test.adoc:7:19:vale.Redundancy:'ACT test' is redundant
+      test.adoc:19:1:vale.Redundancy:'ACT test' is redundant
+
+  - name: rst
+    args: test.rst
+    requires: rst2html
+    exit: 0
+    want: |
+      test.rst:1:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:7:19:vale.Redundancy:'ACT test' is redundant
+      test.rst:19:1:vale.Redundancy:'ACT test' is redundant
+
+  - name: org
+    args: test.org
+    exit: 0
+    want: |
+      test.org:9:19:vale.Redundancy:'ACT test' is redundant
+      test.org:15:19:vale.Redundancy:'ACT test' is redundant
+
+  - name: html
+    args: test.html
+    exit: 1
+    want: |
+      test.html:22:13:Vale.Repetition:'bye' is repeated!
+
+  - name: html-ignored-classes
+    args: test3.html
+    exit: 1
+    want: |
+      test3.html:30:75:write-good.We:Try to avoid using first-person plural like 'us'.
+      test3.html:33:64:write-good.We:Try to avoid using first-person plural like 'us'.
+
+  - name: html-template
+    about: "Text with no element of its own -- a template language's tags --
+      is excluded by pattern. A BlockIgnores match is wrapped in `<pre>` and a
+      TokenIgnores match in `<code>`, so the prose around them is linted and
+      the tags, and any string inside one, are not."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.html]
+        BasedOnStyles = T
+        BlockIgnores = (?s)({%\s*comment\s*%}.*?{%\s*endcomment\s*%})
+        TokenIgnores = ({{.*?}}), ({%.*?%}), ({#.*?#})
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        nonword: true
+        raw:
+          - (?:ZQX|QQV|\{[{%#]|[}%#]\})
+      page.html: |
+        {% comment %}A ZQX could look like this.{% endcomment %}
+        {# Or like this, ZQX. #}
+        <p>And some QQV content</p>
+        <p>With a {{ variable.ZQX.somewhere }}.</p>
+        <p>{% translate "Or translated ZQX content" %}</p>
+        <p>
+          {% blocktranslate %}
+            For longer stuff or if there's {{ ZQX }}.
+            QQV.
+          {% endblocktranslate %}
+        </p>
+        <p>
+          And the final QQV I'll pull from the docs directly:
+          {% some_tag _("Page not ZQX") value|yesno:_("yes,no") %}
+        </p>
+    args: page.html
+    exit: 1
+    want: |
+      page.html:3:13:T.Tok:'QQV' found
+      page.html:9:5:T.Tok:'QQV' found
+      page.html:13:17:T.Tok:'QQV' found
+
+  - name: python
+    args: test.py
+    exit: 1
+    want: |
+      test.py:1:75:Vale.Spelling:Did you really mean 'ignre'?
+
+  - name: inline-ignored-classes
+    args: test2.rst
+    requires: rst2html
+    exit: 1
+    want: |
+      test2.rst:93:7:Vale.Spelling:Did you really mean 'Mautic'?
+      test2.rst:93:70:Vale.Spelling:Did you really mean 'Mautic's'?
+      test2.rst:95:26:Vale.Spelling:Did you really mean 'Mautic's'?
+      test2.rst:111:56:Vale.Spelling:Did you really mean 'checkall'?
+      test2.rst:126:11:Vale.Spelling:Did you really mean 'attr'?
+      test2.rst:128:78:Vale.Spelling:Did you really mean 'href'?
+      test2.rst:129:11:Vale.Spelling:Did you really mean 'btnText'?
+      test2.rst:132:11:Vale.Spelling:Did you really mean 'iconClass'?
+      test2.rst:135:11:Vale.Spelling:Did you really mean 'tooltip'?
+      test2.rst:137:32:Vale.Spelling:Did you really mean 'tooltip'?
+      test2.rst:143:143:Vale.Spelling:Did you really mean 'wil'?
+      test2.rst:156:11:Vale.Spelling:Did you really mean 'confirmText'?
+      test2.rst:159:11:Vale.Spelling:Did you really mean 'confirmAction'?
+      test2.rst:162:11:Vale.Spelling:Did you really mean 'cancelText'?
+      test2.rst:165:11:Vale.Spelling:Did you really mean 'cancelCallback'?
+      test2.rst:167:11:Vale.Spelling:Did you really mean 'Mautic'?
+      test2.rst:167:18:Vale.Spelling:Did you really mean 'namespaced'?
+      test2.rst:167:29:Vale.Spelling:Did you really mean 'Javascript'?
+      test2.rst:168:11:Vale.Spelling:Did you really mean 'confirmCallback'?
+      test2.rst:170:11:Vale.Spelling:Did you really mean 'Mautic'?
+      test2.rst:170:18:Vale.Spelling:Did you really mean 'namespaced'?
+      test2.rst:170:29:Vale.Spelling:Did you really mean 'Javascript'?
+      test2.rst:171:11:Vale.Spelling:Did you really mean 'precheck'?
+      test2.rst:173:11:Vale.Spelling:Did you really mean 'Mautic'?
+      test2.rst:173:18:Vale.Spelling:Did you really mean 'namespaced'?
+      test2.rst:173:29:Vale.Spelling:Did you really mean 'Javascript'?
+      test2.rst:174:11:Vale.Spelling:Did you really mean 'btnClass'?
+      test2.rst:177:11:Vale.Spelling:Did you really mean 'iconClass'?
+      test2.rst:183:11:Vale.Spelling:Did you really mean 'attr'?
+      test2.rst:186:11:Vale.Spelling:Did you really mean 'tooltip'?
+      test2.rst:188:45:Vale.Spelling:Did you really mean 'tooltip'?
+      test2.rst:230:58:Vale.Spelling:Did you really mean 'renderButtons'?
+
+  - name: token-ignores-path-scoped
+    about: "#839 -- a section keyed on a path, not an extension, still applies
+      its ignore patterns"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = T
+
+        [tutorials/*.md]
+        TokenIgnores = (\[\[[^\]]+\]\])
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        nonword: true
+        raw:
+          - (?:ZQX|QQV)
+      tutorials/a.md: |
+        Ignored [[ZQX]] here, but QQV is not.
+      guides/b.md: |
+        Not ignored [[ZQX]] here.
+    args: .
+    exit: 1
+    want: |
+      guides/b.md:1:15:T.Tok:'ZQX' found
+      tutorials/a.md:1:27:T.Tok:'QQV' found
+
+  - name: ignores-keep-escaped-commas
+    about: "#1164 -- a comma escaped as `\\,` stays inside its pattern, so a
+      quantifier like `{2,}` survives; a bare comma still separates patterns"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BlockIgnores = BEGIN.{2\,}END
+
+        [*.md]
+        BasedOnStyles = T
+        TokenIgnores = \b[a-z]{2\,}QQV\b, (<http[^\n]+>+?)
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        nonword: true
+        raw:
+          - (?:ZQX|QQV)
+      a.md: |
+        Ignored abQQV and <http://ZQX.example>, but QQV is not.
+
+        BEGIN and ZQX inside END, but ZQX outside.
+    args: a.md
+    exit: 1
+    want: |
+      a.md:1:45:T.Tok:'QQV' found
+      a.md:3:31:T.Tok:'ZQX' found
+
+  - name: repeated-autolink
+    about: "#847 -- an autolink's URL is one run of source, reported twice by
+      the parser; masking the `href` copy used to send the text's search to the
+      next identical URL in the document, moving every later block's alerts
+      onto its line. The three files differ only in lines that hold no alert,
+      so all three report the same two."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = T
+      styles/T/GitHub.yml: |
+        extends: substitution
+        message: Use '%s' instead of '%s'
+        level: warning
+        ignorecase: true
+        swap:
+          GitHub: GitHub
+      trailing-prose.md: |
+        http://github.com bar
+
+        [github](#whatever)
+        [github1](#whatever)
+        [github.](#whatever)
+
+        https://jwodder.github.io/
+        http://github.com
+
+        whatever
+      trailing-url.md: |
+        http://github.com bar
+
+        [github](#whatever)
+        [github1](#whatever)
+        [github.](#whatever)
+
+        https://jwodder.github.io/
+
+        http://github.com
+      no-leading-url.md: |
+        bar
+
+        [github](#whatever)
+        [github1](#whatever)
+        [github.](#whatever)
+
+        https://jwodder.github.io/
+
+        http://github.com
+    args: .
+    exit: 0
+    want: |
+      no-leading-url.md:3:2:T.GitHub:Use 'GitHub' instead of 'github'
+      no-leading-url.md:5:2:T.GitHub:Use 'GitHub' instead of 'github'
+      trailing-prose.md:3:2:T.GitHub:Use 'GitHub' instead of 'github'
+      trailing-prose.md:5:2:T.GitHub:Use 'GitHub' instead of 'github'
+      trailing-url.md:3:2:T.GitHub:Use 'GitHub' instead of 'github'
+      trailing-url.md:5:2:T.GitHub:Use 'GitHub' instead of 'github'
+
+  - name: inline-markup-position
+    about: "#502 -- a word split from its neighbour by an inline tag leaves the
+      block's text nowhere in the source. Each alert is still placed by the
+      runs the block was read from, rather than dropped or given the width of
+      the line."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.html]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+        Vale.Terms = NO
+        Vale.Avoid = NO
+      sample.html: |
+        <html>
+        <body>
+          <p>This paragraph has has a duplication.</p>
+          <p>This paragraph has <b>has</b> a duplication.</p>
+          <p>
+            This paragraph has has a
+            duplication on multiple lines.
+          </p>
+
+          <p>This paragraph has <b>has</b> an <font>obsolete</font> tag</p>
+          <p>
+            This paragraph has <b>has</b> a
+            duplication on multiple lines.
+          </p>
+          <p>
+            This paragraph has
+            has a duplication
+            across lines.
+          </p>
+        </body>
+        </html>
+    args: sample.html
+    exit: 1
+    want: |
+      sample.html:3:21:Vale.Repetition:'has' is repeated!
+      sample.html:4:21:Vale.Repetition:'has' is repeated!
+      sample.html:6:20:Vale.Repetition:'has' is repeated!
+      sample.html:10:21:Vale.Repetition:'has' is repeated!
+      sample.html:12:20:Vale.Repetition:'has' is repeated!
+      sample.html:16:20:Vale.Repetition:'has' is repeated!

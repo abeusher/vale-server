@@ -3,10 +3,8 @@ package check
 import (
 	"fmt"
 
-	"github.com/jdkato/twine/summarize"
-
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 // Readability checks the reading grade level of text.
@@ -29,12 +27,11 @@ func NewReadability(_ *core.Config, generic baseCheck, path string) (Readability
 	}
 
 	if core.AllStringsInSlice(rule.Metrics, readabilityMetrics) {
-		// NOTE: This is the only extension point that doesn't support scoping.
-		// The reason for this is that we need to split on sentences to
-		// calculate readability, which means that specifying a scope smaller
-		// than a paragraph or including non-block level content (i.e.,
-		// headings, list items or table cells) doesn't make sense.
-		rule.Definition.Scope = []string{"summary"}
+		rule.Definition.Scope = measuredScope(rule.Definition.Scope)
+	} else if len(rule.Definition.Scope) == 0 {
+		// A rule naming a metric this check doesn't know has always run on
+		// `text`, the default an unset scope used to compile to.
+		rule.Definition.Scope = []string{"text"}
 	}
 
 	return rule, nil
@@ -45,7 +42,7 @@ func (o Readability) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Al
 	var grade float64
 	var alerts []core.Alert
 
-	doc := summarize.NewDocument(blk.Text)
+	doc := blk.Summarize()
 
 	if core.StringInSlice("SMOG", o.Metrics) {
 		grade += doc.SMOG()

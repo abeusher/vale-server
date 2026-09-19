@@ -1,8 +1,10 @@
 package spell
 
 import (
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseFlagsASCII(t *testing.T) {
@@ -73,6 +75,29 @@ SFX 200 0 in .
 	}
 	if len(a200.Rules) != 1 || a200.Rules[0].AffixText != "in" {
 		t.Errorf("flag 200 rules = %v, want [{in}]", a200.Rules)
+	}
+}
+
+func TestNoSuggestLongFlag(t *testing.T) {
+	// French dictionaries declare `FLAG long` and use `--` as the NOSUGGEST
+	// flag. This previously failed to parse ("NOSUGGEST stanza had more than
+	// one flag"). See #862.
+	affContent := `SET UTF-8
+FLAG long
+NOSUGGEST --
+
+SFX Aa Y 1
+SFX Aa 0 s .
+`
+	aff, err := newDictConfig(strings.NewReader(affContent))
+	if err != nil {
+		t.Fatalf("newDictConfig error: %v", err)
+	}
+	if aff.NoSuggestFlag != "--" {
+		t.Errorf("NoSuggestFlag = %q, want %q", aff.NoSuggestFlag, "--")
+	}
+	if _, ok := aff.AffixMap["Aa"]; !ok {
+		t.Error("AffixMap missing long flag 'Aa'")
 	}
 }
 
@@ -194,6 +219,7 @@ coituum
 	}{
 		{"stave", true},   // base word, morphology stripped
 		{"stavet", true},  // SFX 1 with continuation flags stripped
+		{"stavets", true}, // SFX 1, then its continuation into SFX 34
 		{"staves", true},  // SFX 34
 		{"coituum", true}, // word before the malformed line still loaded
 		{"thtis", false},  // a genuine misspelling is still caught
@@ -243,5 +269,255 @@ test/AB
 		if got != tt.want {
 			t.Errorf("spell(%q) = %v, want %v", tt.word, got, tt.want)
 		}
+	}
+}
+
+func TestCompoundSegmentation(t *testing.T) {
+	// A dictionary that enables affix-flag compounding should accept words
+	// that split into flagged dictionary segments (e.g. German
+	// "Funktionswert"). See #848.
+	dic := "3\nfoo/A\nbar/A\nbaz\n"
+
+	withFlags := "SET UTF-8\nCOMPOUNDFLAG A\nCOMPOUNDMIN 2\n"
+	gs, err := newGoSpellReader(strings.NewReader(withFlags), strings.NewReader(dic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !gs.spell("foobar") {
+		t.Error("expected 'foobar' (foo+bar) to be accepted as a compound")
+	}
+	if gs.spell("fooqux") {
+		t.Error("expected 'fooqux' (qux not a word) to be rejected")
+	}
+	if gs.spell("foobaz") {
+		t.Error("expected 'foobaz' (baz has no compound flag) to be rejected")
+	}
+
+	// Without compound flags, no segmentation happens (English behavior).
+	noFlags := "SET UTF-8\n"
+	gs2, err := newGoSpellReader(strings.NewReader(noFlags), strings.NewReader(dic))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gs2.spell("foobar") {
+		t.Error("expected 'foobar' to be rejected when compounding is disabled")
+	}
+}
+
+func TestConditionlessAffixRule(t *testing.T) {
+	// OpenTaal's Dutch dictionary writes affix rules without the (optional)
+	// condition field, e.g. `SFX CA 0 /CaCp`. A 4-field rule must not be
+	// mistaken for a header and parsed as a cross-product flag ("CrossProduct
+	// is not Y or N: got 0"). See #776.
+	aff := "SET UTF-8\nFLAG long\nSFX Xx Y 1\nSFX Xx 0 s\n"
+	dic := "1\nkat/Xx\n"
+
+	gs, err := newGoSpellReader(strings.NewReader(aff), strings.NewReader(dic))
+	if err != nil {
+		t.Fatalf("newGoSpellReader error: %v", err)
+	}
+	if !gs.spell("kat") {
+		t.Error("expected base word 'kat' to be recognized")
+	}
+	if !gs.spell("kats") {
+		t.Error("expected suffixed 'kats' (conditionless SFX rule) to be recognized")
+	}
+}
+
+// TestContinuationCycleTerminates covers an .aff file whose affix class
+// continues to itself. Nothing in the format forbids it, and following it
+// faithfully would not terminate, so expansion is bounded -- the point of the
+// test is that loading finishes at all and still recognizes the forms the
+// bound does allow.
+func TestContinuationCycleTerminates(t *testing.T) {
+	affContent := `SET UTF-8
+FLAG num
+
+SFX 1 Y 1
+SFX 1 0 s/1 .
+`
+	dicContent := `1
+loop/1
+`
+
+	done := make(chan *goSpell, 1)
+	go func() {
+		gs, err := newGoSpellReader(
+			strings.NewReader(affContent),
+			strings.NewReader(dicContent),
+		)
+		if err != nil {
+			t.Error(err)
+			done <- nil
+			return
+		}
+		done <- gs
+	}()
+
+	select {
+	case gs := <-done:
+		if gs == nil {
+			return
+		}
+		for _, w := range []string{"loop", "loops"} {
+			if !gs.spell(w) {
+				t.Errorf("spell(%q) = false, want true", w)
+			}
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("expansion did not terminate on a self-continuing affix class")
+	}
+}
+
+// A `.aff` is data Vale is handed, so a COMPOUNDMIN it cannot use must not
+// reach the code that treats it as a length.
+func TestCompoundMinIsBounded(t *testing.T) {
+	tests := map[string]int{
+		"COMPOUNDMIN 4":                   4,
+		"COMPOUNDMIN 1":                   1,
+		"COMPOUNDMIN 0":                   defaultCompoundMin,
+		"COMPOUNDMIN -1":                  defaultCompoundMin,
+		"COMPOUNDMIN 9223372036854775807": defaultCompoundMin,
+	}
+
+	for line, want := range tests {
+		aff, err := newDictConfig(strings.NewReader(line))
+		if err != nil {
+			t.Errorf("%q: %v", line, err)
+			continue
+		}
+		if aff.CompoundMin != want {
+			t.Errorf("%q: CompoundMin = %d, want %d", line, aff.CompoundMin, want)
+		}
+	}
+}
+
+// A number too large to represent is refused outright, as any other
+// unparseable COMPOUNDMIN already was.
+func TestCompoundMinRejectsUnparseable(t *testing.T) {
+	for _, line := range []string{
+		"COMPOUNDMIN 99999999999999999999",
+		"COMPOUNDMIN four",
+	} {
+		if _, err := newDictConfig(strings.NewReader(line)); err == nil {
+			t.Errorf("%q: expected an error", line)
+		}
+	}
+}
+
+// A COMPOUNDRULE count only preallocates, so a wild one must not be able to
+// ask for an enormous allocation.
+func TestCompoundRuleCapacityIsBounded(t *testing.T) {
+	aff, err := newDictConfig(strings.NewReader("COMPOUNDRULE 9223372036854775807"))
+	if err != nil {
+		t.Fatalf("parsing: %v", err)
+	}
+	if cap(aff.CompoundRule) > maxCompoundRules {
+		t.Errorf("capacity = %d, want <= %d", cap(aff.CompoundRule), maxCompoundRules)
+	}
+}
+
+// A dictionary's BREAK rules let a word pass when each piece does. See
+// #1165.
+func TestBreakRules(t *testing.T) {
+	dic := "2\nfoo\nbar\n"
+	load := func(aff string) *goSpell {
+		t.Helper()
+		gs, err := newGoSpellReader(strings.NewReader(aff), strings.NewReader(dic))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return gs
+	}
+
+	plain := load("SET UTF-8\nBREAK 1\nBREAK -\nWORDCHARS -\n")
+	for word, want := range map[string]bool{
+		"foo-bar":     true,
+		"foo-bar-foo": true, // split more than once
+		"foo-qux":     false,
+		"qux-bar":     false,
+		"-foo":        false, // an interior rule needs both sides
+		"foo-":        false,
+		"foo--bar":    false,
+	} {
+		if got := plain.spell(word); got != want {
+			t.Errorf("BREAK -: spell(%q) = %v, want %v", word, got, want)
+		}
+	}
+
+	anchored := load("SET UTF-8\nBREAK 2\nBREAK ^-\nBREAK -$\n")
+	for word, want := range map[string]bool{
+		"-foo":    true,
+		"foo-":    true,
+		"-foo-":   true,
+		"foo-bar": false, // no interior rule
+		"-":       false,
+	} {
+		if got := anchored.spell(word); got != want {
+			t.Errorf("anchored BREAK: spell(%q) = %v, want %v", word, got, want)
+		}
+	}
+
+	// No BREAK line means Hunspell's defaults: `-`, `^-`, and `-$`.
+	defaults := load("SET UTF-8\n")
+	for word, want := range map[string]bool{
+		"foo-bar": true, "-foo": true, "foo-": true, "foo-qux": false, "-": false,
+	} {
+		if got := defaults.spell(word); got != want {
+			t.Errorf("default BREAK: spell(%q) = %v, want %v", word, got, want)
+		}
+	}
+
+	// `BREAK 0` declares that there are none.
+	none := load("SET UTF-8\nBREAK 0\n")
+	if none.spell("foo-bar") {
+		t.Error("expected 'foo-bar' to be rejected under BREAK 0")
+	}
+}
+
+func TestBreakRulesParse(t *testing.T) {
+	tests := map[string][]string{
+		"BREAK 0":                    nil,
+		"BREAK 2\nBREAK -\nBREAK ^-": {"-", "^-"},
+		"BREAK -\nBREAK --":          {"-", "--"}, // count is optional
+		"BREAK 1\nBREAK 3":           {"3"},       // only the first number is a count
+	}
+	for src, want := range tests {
+		aff, err := newDictConfig(strings.NewReader(src))
+		if err != nil {
+			t.Errorf("%q: %v", src, err)
+			continue
+		}
+		if strings.Join(aff.Break, ",") != strings.Join(want, ",") {
+			t.Errorf("%q: Break = %q, want %q", src, aff.Break, want)
+		}
+	}
+	if _, err := newDictConfig(strings.NewReader("BREAK")); err == nil {
+		t.Error("expected a bare BREAK line to be rejected")
+	}
+}
+
+// A directive the reader does not implement is recorded once, so a caller
+// can tell a dictionary that loaded from one that loaded faithfully.
+func TestUnsupportedDirectivesAreRecorded(t *testing.T) {
+	affContent := `# a comment line
+SET UTF-8
+COMPLEXPREFIXES
+MAP 2
+MAP uü
+COMPLEXPREFIXES
+TRY esianrtolcdugmphbyfvkwzESIANRTOLCDUGMPHBYFVKWZ'
+
+SFX A Y 1
+SFX A 0 s .
+`
+	aff, err := newDictConfig(strings.NewReader(affContent))
+	if err != nil {
+		t.Fatalf("newDictConfig error: %v", err)
+	}
+
+	want := []string{"COMPLEXPREFIXES", "MAP"}
+	if !reflect.DeepEqual(aff.Ignored, want) {
+		t.Errorf("Ignored = %v, want %v", aff.Ignored, want)
 	}
 }

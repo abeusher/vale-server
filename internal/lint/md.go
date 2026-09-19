@@ -8,9 +8,10 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	grh "github.com/yuin/goldmark/renderer/html"
+	"github.com/yuin/goldmark/text"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 // Markdown configuration.
@@ -18,6 +19,9 @@ var goldMd = goldmark.New(
 	goldmark.WithExtensions(
 		extension.GFM,
 		extension.Footnote,
+		// Treat `$$…$$` display math as a skipped block so it isn't
+		// spell-checked as prose. See #878 and math.go.
+		mathExtension{},
 	),
 	goldmark.WithRendererOptions(
 		grh.WithUnsafe(),
@@ -33,7 +37,13 @@ var reLinkDef = regexp.MustCompile(`\[(?:[^]\n]+)\]:`)
 
 var reNumericList = regexp.MustCompile(`(?m)^\d+\.`)
 
-func (l Linter) lintMarkdown(f *core.File) error {
+func (l *Linter) lintMarkdown(f *core.File) error {
+	return l.lintMarkdownWith(f, goldMd)
+}
+
+// lintMarkdownWith lints f as Markdown read by the given converter -- the
+// plain configuration, or a dialect's such as MyST's.
+func (l *Linter) lintMarkdownWith(f *core.File, md goldmark.Markdown) error {
 	var buf bytes.Buffer
 
 	err := l.lintMetadata(f)
@@ -46,10 +56,20 @@ func (l Linter) lintMarkdown(f *core.File) error {
 		return err
 	}
 
-	if err = goldMd.Convert([]byte(s), &buf); err != nil {
+	src := []byte(s)
+	doc := md.Parser().Parse(text.NewReader(src))
+	if err = md.Renderer().Render(&buf, src, doc); err != nil {
 		return core.NewE100(f.Path, err)
 	}
 
+	if md == goldMdx {
+		// The transform rewrites the front matter, so the spans of the
+		// parsed text are not the file's; the file is parsed again for them.
+		if s != f.Content {
+			doc = md.Parser().Parse(text.NewReader([]byte(f.Content)))
+		}
+		f.Content = maskSpans(f.Content, mdxTagMasks(doc))
+	}
 	f.Content = prepMarkdown(f.Content)
 	return l.lintHTMLTokens(f, buf.Bytes(), 0)
 }

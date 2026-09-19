@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/errata-ai/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/core"
 )
 
 func Test_applyPatterns(t *testing.T) {
@@ -22,7 +22,7 @@ func Test_applyPatterns(t *testing.T) {
 					".md": {"{/*", "*/}"},
 				},
 			},
-			exts: extensionConfig{".md", ".md"},
+			exts: extensionConfig{Normed: ".md", Real: ".md"},
 			content: `
 This is the intro pagragraph.
 
@@ -37,7 +37,7 @@ This is the intro pagragraph.
 		{
 			description: "MDX comment in markdown, no custom comment delimiter",
 			conf:        core.Config{},
-			exts:        extensionConfig{".md", ".md"},
+			exts:        extensionConfig{Normed: ".md", Real: ".md"},
 			content: `
 This is the intro pagragraph.
 
@@ -56,7 +56,7 @@ This is the intro pagragraph.
 					".md": {"{/*", "*/}"},
 				},
 			},
-			exts: extensionConfig{".md", ".md"},
+			exts: extensionConfig{Normed: ".md", Real: ".md"},
 			content: `
 This is the intro pagragraph.
 
@@ -83,8 +83,104 @@ This is a comment
 					"cc": "md",
 				},
 			},
-			exts:     extensionConfig{".md", ".cc"},
+			exts:     extensionConfig{Normed: ".md", Real: ".cc"},
 			expected: "Call `\\c func` to start the process.",
+		},
+		{
+			description: "token ignore in a path-scoped section",
+			content:     "A test $g_i = p_i$ here.",
+			conf: core.Config{
+				TokenIgnores: map[string][]string{
+					"tutorials/*.md": {`(\$+[^\n$]+\$+)`},
+				},
+			},
+			exts: extensionConfig{
+				Normed:   ".md",
+				Real:     ".md",
+				RealPath: "tutorials/intro.md",
+			},
+			expected: "A test `$g_i = p_i$` here.",
+		},
+		{
+			description: "path-scoped section keyed on the mapped extension",
+			content:     "A test $g_i = p_i$ here.",
+			conf: core.Config{
+				TokenIgnores: map[string][]string{
+					"tutorials/*.md": {`(\$+[^\n$]+\$+)`},
+				},
+				Formats: map[string]string{
+					"qmd": "md",
+				},
+			},
+			exts: extensionConfig{
+				Normed:   ".md",
+				Real:     ".qmd",
+				RealPath: "tutorials/intro.qmd",
+			},
+			expected: "A test $g_i = p_i$ here.",
+		},
+		{
+			description: "token ignore in a path-scoped section that doesn't match",
+			content:     "A test $g_i = p_i$ here.",
+			conf: core.Config{
+				TokenIgnores: map[string][]string{
+					"tutorials/*.md": {`(\$+[^\n$]+\$+)`},
+				},
+			},
+			exts: extensionConfig{
+				Normed:   ".md",
+				Real:     ".md",
+				RealPath: "guides/intro.md",
+			},
+			expected: "A test $g_i = p_i$ here.",
+		},
+		{
+			description: "block ignore in a path-scoped section",
+			content:     "Intro.\n\nBEGIN\nskipped\nEND\n",
+			conf: core.Config{
+				BlockIgnores: map[string][]string{
+					"docs/**/*.md": {`(?s)(BEGIN.*?END)`},
+				},
+			},
+			exts: extensionConfig{
+				Normed:   ".md",
+				Real:     ".md",
+				RealPath: "docs/src/a.md",
+			},
+			expected: "Intro.\n\n\n```\nBEGIN\nskipped\nEND\n```\n\n",
+		},
+		{
+			description: "block ignore in HTML",
+			content:     "{% comment %}\nskipped\n{% endcomment %}\n<p>Kept.</p>\n",
+			conf: core.Config{
+				BlockIgnores: map[string][]string{
+					"*.html": {`(?s)({%\s*comment\s*%}.*?{%\s*endcomment\s*%})`},
+				},
+			},
+			exts:     extensionConfig{Normed: ".html", Real: ".html"},
+			expected: "<pre>{% comment %}\nskipped\n{% endcomment %}</pre>\n<p>Kept.</p>\n",
+		},
+		{
+			description: "token ignore in HTML",
+			content:     "<p>With a {{ variable }} here.</p>\n",
+			conf: core.Config{
+				TokenIgnores: map[string][]string{
+					"*.html": {`({{.*?}})`},
+				},
+			},
+			exts:     extensionConfig{Normed: ".html", Real: ".html"},
+			expected: "<p>With a <code>{{ variable }}</code> here.</p>\n",
+		},
+		{
+			description: "token ignore in HTML keyed on the real extension",
+			content:     "<p>With a {{ variable }} here.</p>\n",
+			conf: core.Config{
+				TokenIgnores: map[string][]string{
+					"*.htm": {`({{.*?}})`},
+				},
+			},
+			exts:     extensionConfig{Normed: ".html", Real: ".htm"},
+			expected: "<p>With a <code>{{ variable }}</code> here.</p>\n",
 		},
 	}
 
@@ -115,7 +211,7 @@ func Test_applyPatterns_errors(t *testing.T) {
 					".md": {"{/*", ""},
 				},
 			},
-			exts: extensionConfig{".md", ".md"},
+			exts: extensionConfig{Normed: ".md", Real: ".md"},
 			content: `
 This is the intro pagragraph.
 

@@ -2,15 +2,17 @@ package check
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
 	"github.com/d5/tengo/v2"
+	"github.com/d5/tengo/v2/parser"
 	"github.com/d5/tengo/v2/stdlib"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 var boilerplate = `math := import("math"); __res__ := (%s)`
@@ -41,21 +43,37 @@ func NewMetric(_ *core.Config, generic baseCheck, path string) (Metric, error) {
 	}
 
 	rule.path = path
-	rule.Definition.Scope = []string{"summary"}
+	rule.Definition.Scope = measuredScope(rule.Definition.Scope)
 	rule.Formula = headings.ReplaceAllString(rule.Formula, "heading_$1")
 
 	return rule, nil
 }
 
-// Run calculates the readability level of the given text.
-func (o Metric) Run(_ nlp.Block, f *core.File, _ *core.Config) ([]core.Alert, error) {
-	alerts := []core.Alert{}
-	ctx := context.Background()
+// measuredScope is the scope a measuring rule runs on.
+//
+// Unset, it measures the document. So does `text`: the document's prose is
+// what the summary holds, and `text` was what an unset scope used to compile
+// to, so a rule that declared it keeps measuring what it always measured.
+// Any other scope measures the blocks it names.
+func measuredScope(declared []string) []string {
+	if len(declared) == 0 || (len(declared) == 1 && declared[0] == "text") {
+		return []string{"summary"}
+	}
+	return declared
+}
 
-	parameters, err := f.ComputeMetrics()
-	if err != nil {
-		return alerts, err
-	} else if len(parameters) == 0 {
+// Run calculates the readability level of the given text.
+func (o Metric) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert, error) {
+	alerts := []core.Alert{}
+
+	// A formula is compiled and run as a Tengo program, so it needs the same
+	// deadline a script rule gets; see tengoTimeout. Both evalMath calls share
+	// it, which bounds the rule as a whole rather than each half of it.
+	ctx, cancel := context.WithTimeout(context.Background(), tengoTimeout)
+	defer cancel()
+
+	parameters := core.BlockMetrics(blk.Summarize(), blk.Metrics)
+	if len(parameters) == 0 {
 		// empty file.
 		return alerts, nil
 	}
@@ -73,15 +91,21 @@ func (o Metric) Run(_ nlp.Block, f *core.File, _ *core.Config) ([]core.Alert, er
 	// We need this to allow showing the result in a rule's message.
 	res, err := evalMath(ctx, o.Formula, parameters)
 	if err != nil {
-		return alerts, core.NewE201FromTarget(err.Error(), "formula", o.path)
+		return alerts, ruleError(
+			o.Name, "formula", o.path, err, errors.Is(ctx.Err(), context.DeadlineExceeded))
 	}
 
-	// The binary result of our formula:
+	// The binary result of our formula. The condition reads as a comparison
+	// against the result -- `> 9` -- and the result is also `result`, so a
+	// condition can bound it from both sides, or weigh it against another
+	// count, without repeating the formula: `>= 10 && result < 14`.
+	parameters["result"] = res
 	eqb := fmt.Sprintf("%f %s", res, o.Condition)
 
 	match, err := evalMath(ctx, eqb, parameters)
 	if err != nil {
-		return alerts, core.NewE201FromTarget(err.Error(), "condition", o.path)
+		return alerts, ruleError(
+			o.Name, "condition", o.path, err, errors.Is(ctx.Err(), context.DeadlineExceeded))
 	}
 
 	if match.(bool) {
@@ -105,6 +129,38 @@ func (o Metric) Pattern() string {
 	return o.Formula
 }
 
+// checkExpression rejects anything that is not a single expression.
+//
+// A formula is placed into the boilerplate above by substitution, so a value
+// carrying its own parentheses could parse as several statements rather than
+// the one it is meant to be. `condition` is substituted the same way, after the
+// computed value, and needs the same check.
+//
+// Parsing the value on its own settles what it is while it is still a string:
+// anything that is not exactly one expression is a formula this rule cannot
+// evaluate, and saying so here gives a better error than compiling it would.
+func checkExpression(expr string) error {
+	fileSet := parser.NewFileSet()
+	srcFile := fileSet.AddFile("expression", -1, len(expr))
+
+	parsed, err := parser.NewParser(srcFile, []byte(expr), nil).ParseFile()
+	if err != nil {
+		return fmt.Errorf("invalid expression %q: %w", expr, err)
+	}
+
+	if len(parsed.Stmts) != 1 {
+		return fmt.Errorf(
+			"expected a single expression, found %d statements in %q",
+			len(parsed.Stmts), expr)
+	}
+	if _, ok := parsed.Stmts[0].(*parser.ExprStmt); !ok {
+		return fmt.Errorf(
+			"expected an expression, found %T in %q", parsed.Stmts[0], expr)
+	}
+
+	return nil
+}
+
 func evalMath(
 	ctx context.Context,
 	expr string,
@@ -113,6 +169,10 @@ func evalMath(
 	expr = strings.TrimSpace(expr)
 	if expr == "" {
 		return nil, fmt.Errorf("empty expression")
+	}
+
+	if err := checkExpression(expr); err != nil {
+		return nil, err
 	}
 
 	script := tengo.NewScript([]byte(fmt.Sprintf(boilerplate, expr)))

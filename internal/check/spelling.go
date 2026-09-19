@@ -6,17 +6,21 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
+	"sort"
 	"strings"
+	"unicode"
 
-	"github.com/errata-ai/regexp2"
 	"github.com/mitchellh/mapstructure"
+	rx "github.com/vale-cli/vale/v3/internal/regex"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
-	"github.com/errata-ai/vale/v3/internal/spell"
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/spell"
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
+// defaultFilters is the reference the scans in spellfilter.go are tested
+// against; the linter runs the scans.
 var defaultFilters = []*regexp.Regexp{
 	regexp.MustCompile(`[A-Z]{1}[a-z]+[A-Z]+\w+`),
 	regexp.MustCompile(`[A-Z]+$`),
@@ -25,8 +29,12 @@ var defaultFilters = []*regexp.Regexp{
 
 // Spelling checks text against a Hunspell dictionary.
 type Spelling struct {
-	Definition   `mapstructure:",squash"`
-	Filters      []*regexp.Regexp
+	Definition `mapstructure:",squash"`
+	Filters    []*regexp.Regexp
+
+	// stdFilters applies the built-in filters, which are hand-written rather
+	// than compiled. Set unless the rule declares `custom: true`.
+	stdFilters   bool
 	Ignore       []string
 	Exceptions   []string
 	Dictionaries []string
@@ -34,11 +42,16 @@ type Spelling struct {
 	Dic          string
 	Dicpath      string
 	Threshold    int
-	exceptRe     *regexp2.Regexp
-	phraseRe     *regexp2.Regexp
+	exceptRe     *rx.Regexp
+	phraseRe     *rx.Regexp
 	gs           *spell.Checker
 	Custom       bool
 	Append       bool
+
+	// `split` (`bool`): Check the parts of an identifier -- `recieveMessage`,
+	// `recieve_message`, `RecieveMessage` -- rather than skipping it or
+	// checking it whole. A part is reported at its own position.
+	Split bool
 }
 
 func addFilters(s *Spelling, generic baseCheck, _ *core.Config) error {
@@ -78,11 +91,12 @@ func addExceptions(s *Spelling, generic baseCheck, cfg *core.Config) error { //n
 		//
 		// The assumption is that, for spell checking, we don't want to
 		// flag words that are part of a larger word.
+		term = termPattern(term)
 		if !strings.HasPrefix(term, "\b") && !strings.HasSuffix(term, "\b") {
 			term = `\b` + term + `\b`
 		}
 		s.Exceptions = append(s.Exceptions, term)
-		s.exceptRe = regexp2.MustCompileStd(
+		s.exceptRe = rx.MustCompile(
 			ignoreCase + strings.Join(s.Exceptions, "|"))
 	}
 
@@ -162,7 +176,10 @@ func NewSpelling(cfg *core.Config, generic baseCheck, path string) (Spelling, er
 	}
 
 	if !rule.Custom {
-		rule.Filters = append(rule.Filters, defaultFilters...)
+		// The defaults are answered by hand rather than by regex -- see
+		// spellfilter.go. They are not appended to Filters, so a rule that also
+		// declares its own filters runs those as regexes and these as code.
+		rule.stdFilters = true
 	}
 	rule.gs = model
 
@@ -170,23 +187,20 @@ func NewSpelling(cfg *core.Config, generic baseCheck, path string) (Spelling, er
 }
 
 // Run performs spell-checking on the provided text.
-func (s Spelling) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert, error) {
+func (s Spelling) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
 	var alerts []core.Alert
-
-	txt := blk.Text
-	// This ensures that we respect `.aff` entries like `ICONV ’ '`,
-	// allowing us to avoid false positives.
-	//
-	// See https://github.com/errata-ai/vale/v2/issues/148.
-	txt = s.gs.Convert(txt)
+	vocab := vocabFor(cfg, f)
 
 	// Mask any accepted multi-word phrases (e.g. `mea culpa`) so their
 	// component words aren't spell-checked individually, while the same words
 	// elsewhere still are. We replace each match with an equal-length run of
 	// spaces, which preserves the byte offsets of every other word. See #1035.
-	checkTxt := txt
+	//
+	// This masks the block's own text rather than a converted copy, so that
+	// every offset below is one into `blk.Text` and needs no translation.
+	checkTxt := blk.Text
 	if s.phraseRe != nil {
-		masked, err := s.phraseRe.ReplaceFunc(txt, func(m regexp2.Match) string {
+		masked, err := s.phraseRe.ReplaceFunc(blk.Text, func(m rx.Match) string {
 			return strings.Repeat(" ", len(m.String()))
 		}, -1, -1)
 		if err == nil {
@@ -194,29 +208,112 @@ func (s Spelling) Run(blk nlp.Block, _ *core.File, _ *core.Config) ([]core.Alert
 		}
 	}
 
+	// Each word's position comes back with it, which is what lets the alert be
+	// placed by arithmetic instead of by searching the whole context for its
+	// text once per alert. Searching also could not tell one occurrence of a
+	// repeated word from another, and so reported the first one every time.
+	words, offsets := nlp.WordTokenizer.TokenizeWithOffsets(checkTxt)
+
 OUTER:
-	for _, word := range nlp.WordTokenizer.Tokenize(checkTxt) {
+	for i, found := range words {
+		// This ensures that we respect `.aff` entries like `ICONV ’ '`,
+		// allowing us to avoid false positives.
+		//
+		// It is applied per word, which is where hunspell applies it, and what
+		// keeps the offsets above measured against the text as written: the
+		// conversions change length, so a position taken from a converted copy
+		// of the block drifts further out of place with every one that fires.
+		//
+		// See https://github.com/errata-ai/vale/v2/issues/148.
+		word := s.gs.Convert(found)
+
+		if s.stdFilters && s.skipped(word) {
+			continue
+		}
 		for _, filter := range s.Filters {
 			if filter.MatchString(word) {
 				continue OUTER
 			}
 		}
 
-		if !s.gs.Spell(word) && !isMatch(s.exceptRe, word) {
-			offset := strings.Index(checkTxt, word)
-			loc := []int{offset, offset + len(word)}
-
-			a := core.Alert{Check: s.Name, Severity: s.Level, Span: loc,
-				Link: s.Link, Match: word, Action: s.Action}
-
-			a.Message, a.Description = formatMessages(s.Message,
-				s.Description, word)
-
-			alerts = append(alerts, a)
+		if s.gs.Spell(word) || isMatch(s.exceptRe, word) || vocab.accepts(word, checkTxt, []int{offsets[i], offsets[i] + len(found)}) {
+			continue
 		}
+
+		// The extent is the word as it appears, not as it converts: the
+		// offset is a position in the block's own text, so the length that
+		// goes with it has to be measured there too.
+		offset := offsets[i]
+		if s.Split {
+			// A plain word is reported whole; anything else is an identifier,
+			// and only its parts are.
+			if parts := splitIdentifier(found); len(parts) != 1 || parts[0].text != found {
+				for _, part := range parts {
+					if s.checkPart(part.text) || vocab.accepts(part.text, "", nil) {
+						continue
+					}
+					a := s.alert(part.text, offset+part.at, len(part.text))
+					// A part is not a whole word, so a search for it would
+					// land elsewhere; the block knows where it is. Where it
+					// does not, the whole identifier is reported instead.
+					if at := blk.SourceOffset(offset + part.at); at >= 0 {
+						a.Span = []int{at, at + len(part.text)}
+						a.HasByteOffsets = true
+					} else {
+						a.Match, a.Span = found, []int{offset, offset + len(found)}
+					}
+					alerts = append(alerts, a)
+				}
+				continue
+			}
+		}
+		a := s.alert(word, offset, len(found))
+		// The block knows where it is, so the word need not be searched
+		// for, which found an earlier copy of it or one in markup.
+		if at := blk.SourceOffset(offset); at >= 0 {
+			a.Span = []int{at, at + len(found)}
+			a.HasByteOffsets = true
+		}
+		alerts = append(alerts, a)
 	}
 
 	return alerts, nil
+}
+
+// skipped reports whether the built-in filters skip a word. With `split`,
+// an identifier is not skipped but taken apart, so only a word with a
+// character no identifier holds is.
+func (s Spelling) skipped(word string) bool {
+	if s.Split {
+		return skipsNonIdentifier(word)
+	}
+	return skippedByDefault(word)
+}
+
+// checkPart reports whether one part of an identifier passes: a short part
+// or an acronym is not checked.
+func (s Spelling) checkPart(part string) bool {
+	letters := 0
+	for _, r := range part {
+		if unicode.IsLetter(r) {
+			letters++
+		}
+	}
+	if letters < minPartLetters || strings.ToUpper(part) == part {
+		return true
+	}
+	return s.gs.Spell(s.gs.Convert(part)) || isMatch(s.exceptRe, part)
+}
+
+// minPartLetters is the shortest part of an identifier that is checked.
+const minPartLetters = 3
+
+// alert reports a misspelling at a position in the block.
+func (s Spelling) alert(word string, at, length int) core.Alert {
+	a := core.Alert{Check: s.Name, Severity: s.Level, Span: []int{at, at + length},
+		Link: s.Link, Match: word, Action: s.Action}
+	a.Message, a.Description = formatMessages(s.Message, s.Description, word)
+	return a
 }
 
 // Fields provides access to the internal rule definition.
@@ -229,9 +326,68 @@ func (s Spelling) Pattern() string {
 	return ""
 }
 
-// Pattern is the internal regex pattern used by this rule.
+// Suggest returns the closest spellings of word from the dictionaries.
 func (s Spelling) Suggest(word string) []string {
-	return s.gs.Suggest(word)
+	return s.SuggestFor(word, nil)
+}
+
+// SuggestFor is Suggest with the project's vocabularies as candidates too:
+// an accepted term as close as a dictionary word is suggested first, in
+// the case the vocabulary spells it.
+func (s Spelling) SuggestFor(word string, cfg *core.Config) []string {
+	ranked := s.gs.Rank(word)
+	if cfg == nil {
+		return suggestionWords(ranked)
+	}
+
+	lower := strings.ToLower(word)
+	floor := 0.0
+	if len(ranked) > 0 {
+		floor = ranked[len(ranked)-1].Score
+	}
+
+	terms := append([]string(nil), cfg.AcceptedTokens...)
+	for _, v := range cfg.Vocabularies {
+		if v != nil {
+			terms = append(terms, v.Accepted...)
+		}
+	}
+	merged := make([]spell.Suggestion, 0, len(terms)+len(ranked))
+	for _, term := range terms {
+		if strings.EqualFold(term, word) {
+			continue
+		}
+		if score := spell.Similarity(strings.ToLower(term), lower); score >= floor && score > 0 {
+			merged = append(merged, spell.Suggestion{Word: term, Score: score})
+		}
+	}
+
+	// Stable, so a vocabulary term keeps its place ahead of a dictionary
+	// word it ties with, or repeats.
+	merged = append(merged, ranked...)
+	sort.SliceStable(merged, func(i, j int) bool {
+		return merged[i].Score > merged[j].Score
+	})
+	out := make([]string, 0, 6)
+	seen := map[string]bool{}
+	for _, m := range merged {
+		if seen[m.Word] {
+			continue
+		}
+		seen[m.Word] = true
+		if out = append(out, m.Word); len(out) == 6 {
+			break
+		}
+	}
+	return out
+}
+
+func suggestionWords(ranked []spell.Suggestion) []string {
+	out := make([]string, 0, len(ranked))
+	for _, r := range ranked {
+		out = append(out, r.Word)
+	}
+	return out
 }
 
 func makeSpeller(s *Spelling, cfg *core.Config, rulePath string) (*spell.Checker, error) {

@@ -3,10 +3,10 @@ package check
 import (
 	"strings"
 
-	"github.com/errata-ai/regexp2"
+	rx "github.com/vale-cli/vale/v3/internal/regex"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/nlp"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/nlp"
 )
 
 // Repetition looks for repeated uses of Tokens.
@@ -19,9 +19,9 @@ type Repetition struct {
 	Vocab      bool
 	Exceptions []string
 
-	exceptRe *regexp2.Regexp
-	phraseRe *regexp2.Regexp
-	pattern  *regexp2.Regexp
+	exceptRe *rx.Regexp
+	phraseRe *rx.Regexp
+	pattern  *rx.Regexp
 }
 
 // NewRepetition creates a new `repetition`-based rule.
@@ -51,7 +51,7 @@ func NewRepetition(cfg *core.Config, generic baseCheck, path string) (Repetition
 	}
 	regex += `(` + strings.Join(rule.Tokens, "|") + `)`
 
-	made, err := regexp2.CompileStd(regex)
+	made, err := rx.Compile(regex)
 	if err != nil {
 		return rule, core.NewE201FromPosition(err.Error(), path, 1)
 	}
@@ -63,7 +63,8 @@ func NewRepetition(cfg *core.Config, generic baseCheck, path string) (Repetition
 // Run executes the `repetition`-based rule.
 //
 // The rule looks for repeated matches of its regex -- such as "this this".
-func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.Alert, error) {
+func (o Repetition) Run(blk nlp.Block, f *core.File, cfg *core.Config) ([]core.Alert, error) {
+	vocab := vocabFor(cfg, f)
 	var curr, prev string
 	var hit bool
 	var ploc []int
@@ -72,7 +73,7 @@ func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.A
 
 	txt := blk.Text
 	for _, loc := range o.pattern.FindAllStringIndex(txt, -1) {
-		converted, err := re2Loc(txt, loc)
+		converted, err := re2Loc(blk, loc)
 		if err != nil {
 			return alerts, err
 		}
@@ -92,7 +93,7 @@ func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.A
 		if hit && count > o.Max {
 			pos := []int{ploc[0], loc[1]}
 
-			converted, err = re2Loc(txt, pos)
+			converted, err = re2Loc(blk, pos)
 			if err != nil {
 				return alerts, err
 			}
@@ -105,14 +106,17 @@ func (o Repetition) Run(blk nlp.Block, _ *core.File, cfg *core.Config) ([]core.A
 				//
 				// All plans except a Personal plan can use Redis. Redis ...
 				floc := []int{ploc[0], loc[1]}
-				if !isMatch(o.exceptRe, converted) && !withinPhrase(o.phraseRe, txt, floc) {
-					a, erra := makeAlert(o.Definition, floc, txt, cfg)
+				if !isMatch(o.exceptRe, converted) && !withinPhrase(o.phraseRe, txt, floc) &&
+					!vocab.accepts(converted, txt, floc) {
+					a, erra := makeAlert(o.Definition, floc, blk, cfg)
 					if erra != nil {
 						return alerts, erra
 					}
 
 					a.Message, a.Description = formatMessages(o.Message,
 						o.Description, curr)
+
+					anchor(&a, blk)
 					alerts = append(alerts, a)
 					count = 0
 				}

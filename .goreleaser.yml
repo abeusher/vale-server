@@ -71,6 +71,26 @@ builds:
       - -s -w -X main.version={{.Version}}
       - -extldflags=-static
 
+  # Windows on ARM builds with llvm-mingw rather than the mingw-w64 that the
+  # amd64 target uses -- the latter has no aarch64 cross-compiler, and cgo
+  # rules out building without one. `goreleaser-cross` keeps it here.
+  - id: vale-windows-arm64
+    main: ./cmd/vale
+    binary: vale
+    goarch:
+      - arm64
+    goos:
+      - windows
+    env:
+      - CC=/llvm-mingw/bin/aarch64-w64-mingw32-gcc
+      - CXX=/llvm-mingw/bin/aarch64-w64-mingw32-g++
+    flags:
+      - -trimpath
+      - -buildmode=exe
+    ldflags:
+      - -s -w -X main.version={{.Version}}
+      - -extldflags=-static
+
 archives:
   - format: tar.gz
     format_overrides:
@@ -119,25 +139,25 @@ chocolateys:
 
     # Your app's project url.
     # It is a required field.
-    project_url: https://github.com/errata-ai/vale
+    project_url: https://github.com/vale-cli/vale
 
     # Template for the url which is determined by the given Token (github,
     # gitlab or gitea)
     # Default depends on the client.
     #
-    # https://github.com/errata-ai/vale/releases/download/v2.21.0/vale_2.21.0_Windows_64-bit.zip
-    url_template: "https://github.com/errata-ai/vale/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    # https://github.com/vale-cli/vale/releases/download/v2.21.0/vale_2.21.0_Windows_64-bit.zip
+    url_template: "https://github.com/vale-cli/vale/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
 
     # App's icon.
     # Default is empty.
-    icon_url: https://github.com/errata-ai.png
+    icon_url: https://github.com/vale-cli.png
 
     # Your app's copyright details.
     # Default is empty.
     copyright: © Joseph Kato
 
     # App's license information url.
-    license_url: https://github.com/errata-ai/vale/blob/master/LICENSE
+    license_url: https://github.com/vale-cli/vale/blob/v3/LICENSE
 
     # Your apps's require license acceptance:
     # Specify whether the client must prompt the consumer to accept the package
@@ -147,7 +167,7 @@ chocolateys:
 
     # Your app's source url.
     # Default is empty.
-    project_source_url: https://github.com/errata-ai/install/tree/main/pkg/chocolatey
+    project_source_url: https://github.com/vale-cli/install/tree/main/pkg/chocolatey
 
     # Your app's documentation url.
     # Default is empty.
@@ -155,7 +175,7 @@ chocolateys:
 
     # App's bugtracker url.
     # Default is empty.
-    bug_tracker_url: https://github.com/errata-ai/vale/issues
+    bug_tracker_url: https://github.com/vale-cli/vale/issues
 
     # Your app's tag list.
     # Default is empty.
@@ -176,7 +196,7 @@ chocolateys:
     # providing a URL to an external list of Release Notes is perfectly
     # acceptable.
     # Default is empty.
-    release_notes: "https://github.com/errata-ai/vale/releases/tag/v{{ .Version }}"
+    release_notes: "https://github.com/vale-cli/vale/releases/tag/v{{ .Version }}"
 
     # The api key that should be used to push to the chocolatey repository.
     #

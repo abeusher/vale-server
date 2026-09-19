@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/lint/code"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/lint/code"
 )
 
 func findLine(s string, line int) string {
@@ -33,10 +33,7 @@ func adjustAlerts(alerts []core.Alert, last int, comment code.Comment, lang *cod
 		if i >= last {
 			line := findLine(comment.Source, alerts[i].Line)
 
-			padding := lang.Padding(line)
-			if strings.HasPrefix(line, " ") {
-				padding += leadingSpaces(line, comment.Offset)
-			}
+			padding := commentPadding(comment, alerts[i].Line, line, lang)
 
 			alerts[i].Line += comment.Line - 1
 			alerts[i].Span = []int{
@@ -48,11 +45,43 @@ func adjustAlerts(alerts []core.Alert, last int, comment code.Comment, lang *cod
 	return alerts
 }
 
-func (l *Linter) lintFragments(f *core.File) error {
-	// We want to set up our processing servers as if we were dealing with
-	// a directory since we likely have many fragments to convert.
-	l.HasDir = true
+// commentPadding returns how far to move an alert to get from a column in the
+// extracted comment back to a column in the source.
+//
+// A dedented comment recorded exactly what it took off each line, so it is
+// asked rather than measured. Measuring the source line only agrees with the
+// dedent when everything removed was whitespace, which is why a language whose
+// decoration is not whitespace -- JSDoc's ` *` -- reported columns that were
+// short by the width of the decoration.
+//
+// The caller adds comment.Offset separately, and a comment that starts in from
+// the margin has that same indentation counted in what the dedent removed, so
+// it comes back off here. This is what leadingSpaces does for the measured
+// path.
+func commentPadding(comment code.Comment, line int, source string, lang *code.Language) int {
+	if n, ok := comment.StripAt(line); ok {
+		// Strip describes the dedent only. The opening delimiter -- `"""`,
+		// `/**` -- was removed before that by Delims, and it is still on the
+		// line the alert is measured against, so it is added here. On any line
+		// but the first there is no delimiter and this contributes nothing.
+		if p := lang.Padding(source); line == 1 && p > 0 {
+			// The delimiter line: Padding counts the marker and the spaces
+			// after it, and those spaces are also what the dedent took off,
+			// so adding the strip would count them twice.
+			return p
+		}
+		return lang.Padding(source) + max(n-comment.Offset, 0)
+	}
 
+	padding := lang.Padding(source)
+	if strings.HasPrefix(source, " ") {
+		padding += leadingSpaces(source, comment.Offset)
+	}
+
+	return padding
+}
+
+func (l *Linter) lintFragments(f *core.File) error {
 	lang, err := code.GetLanguageFromExt(f.RealExt)
 	if err != nil {
 		return err
@@ -70,9 +99,20 @@ func (l *Linter) lintFragments(f *core.File) error {
 		return err
 	}
 
+	wholeFile := f.Content
+
 	last := 0
 	for _, comment := range comments {
-		l.SetMetaScope(comment.Scope)
+		// QDoc reads `/*! ... */` only; a `//` line comment or a plain
+		// `/* ... */` block is code, not documentation.
+		if f.NormedExt == ".qdoc" && !strings.HasPrefix(comment.Source, "/*!") {
+			continue
+		}
+
+		f.SetMetaScope(comment.Scope)
+		if l.skipsComment(comment.Scope) {
+			continue
+		}
 		f.SetText(comment.Text)
 
 		switch f.NormedExt {
@@ -84,6 +124,8 @@ func (l *Linter) lintFragments(f *core.File) error {
 			err = l.lintADoc(f)
 		case ".org":
 			err = l.lintOrg(f)
+		case ".qdoc":
+			err = l.lintQDocFragment(f)
 		default:
 			return fmt.Errorf("unsupported markup format '%s'", f.NormedExt)
 		}
@@ -95,5 +137,8 @@ func (l *Linter) lintFragments(f *core.File) error {
 		last = size
 	}
 
+	// Each comment was linted in the file's place; put the file back, so the
+	// `raw` scope that runs next reads the source and not the last comment.
+	f.RestoreText(wholeFile)
 	return err
 }

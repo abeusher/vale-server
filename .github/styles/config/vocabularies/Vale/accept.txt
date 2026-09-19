@@ -1,4 +1,4 @@
-[cC]onfig
+[cC]onfigs?
 alex
 api
 apos
@@ -9,6 +9,7 @@ backreferences
 choco
 commercetools
 dita
+docstrings?
 docutils
 endcode
 endhint
@@ -29,6 +30,7 @@ lookarounds
 lua
 macOS
 markdata
+Mintlify
 mkdocs
 nonword
 npm
@@ -36,6 +38,7 @@ ot
 passthrough
 pipenv
 pre
+Promptless
 proselint
 rcs
 reStructuredText

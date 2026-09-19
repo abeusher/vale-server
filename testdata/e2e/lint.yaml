@@ -1,0 +1,1859 @@
+# Every markup and source format Vale can lint.
+name: lint
+dir: fixtures/formats
+
+cases:
+  - name: excluded-folders
+    dir: ../folders
+    args: .
+    exit: 0
+    want: ""
+
+  - name: css
+    args: test.css
+    exit: 0
+    want: |
+      test.css:1:4:vale.Annotations:'TODO' left in text
+      test.css:7:19:vale.Annotations:'XXX' left in text
+
+  - name: yaml
+    args: test.yml
+    exit: 0
+    want: |
+      test.yml:3:19:vale.Annotations:'TODO' left in text
+      test.yml:15:45:vale.Annotations:'XXX' left in text
+
+  - name: julia
+    args: test.jl
+    exit: 0
+    want: |
+      test.jl:1:3:vale.Annotations:'NOTE' left in text
+      test.jl:4:3:vale.Annotations:'NOTE' left in text
+      test.jl:9:7:vale.Annotations:'NOTE' left in text
+      test.jl:21:17:vale.Annotations:'NOTE' left in text
+      test.jl:47:3:vale.Annotations:'XXX' left in text
+
+  - name: java
+    args: test.java
+    exit: 0
+    want: |
+      test.java:1:4:vale.Annotations:'XXX' left in text
+      test.java:9:4:vale.Annotations:'TODO' left in text
+
+  - name: proto
+    args: test.proto
+    exit: 0
+    want: |
+      test.proto:13:6:vale.Annotations:'NOTE' left in text
+      test.proto:22:4:vale.Annotations:'XXX' left in text
+      test.proto:31:1:vale.Annotations:'NOTE' left in text
+
+  - name: org
+    args: test.org
+    exit: 0
+    want: |
+      test.org:17:4:vale.Annotations:'TODO' left in text
+      test.org:50:18:vale.Annotations:'TODO' left in text
+
+  - name: org-cross-file
+    about: |
+      #1129: a shared HTML writer carried each Org file's markup into the next,
+      so a heading in one file was reported against a later one too.
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.org]
+        BasedOnStyles = Test
+      styles/Test/Heading.yml: |
+        extends: existence
+        message: "Found '%s'."
+        level: warning
+        scope: heading
+        tokens:
+          - Hello World
+      a.org: |
+        #+title: A
+
+        * Hello World
+      b.org: |
+        #+title: B
+
+        HelloWorld
+    args: a.org b.org
+    exit: 0
+    want: |
+      a.org:3:3:Test.Heading:Found 'Hello World'.
+
+  - name: dita
+    args: test.dita
+    requires: dita
+    exit: 0
+    want: |
+      test.dita:20:82:vale.Annotations:'TODO' left in text
+      test.dita:25:21:vale.Annotations:'NOTE' left in text
+
+  - name: xml
+    args: test.xml
+    requires: xsltproc
+    exit: 0
+    want: |
+      test.xml:19:34:vale.Annotations:'TODO' left in text
+      test.xml:23:21:vale.Annotations:'XXX' left in text
+      test.xml:24:53:vale.Annotations:'FIXME' left in text
+
+  - name: json
+    args: test.json
+    exit: 0
+    want: |
+      test.json:9:10:vale.Annotations:'XXX' left in text
+      test.json:12:19:vale.Annotations:'TODO' left in text
+
+  - name: text
+    args: test.txt
+    exit: 0
+    want: |
+      test.txt:1:27:vale.Annotations:'NOTE' left in text
+      test.txt:4:12:vale.Annotations:'XXX' left in text
+      test.txt:4:66:vale.Annotations:'TODO' left in text
+
+  - name: asciidoc
+    args: test.adoc
+    requires: asciidoctor
+    exit: 0
+    want: |
+      test.adoc:10:39:vale.Annotations:'TODO' left in text
+      test.adoc:29:27:vale.Annotations:'XXX' left in text
+      test.adoc:44:1:vale.Annotations:'TODO' left in text
+      test.adoc:59:1:vale.Annotations:'FIXME' left in text
+      test.adoc:59:21:vale.Annotations:'TODO' left in text
+      test.adoc:59:27:vale.Annotations:'XXX' left in text
+      test.adoc:64:38:vale.Annotations:'XXX' left in text
+      test.adoc:66:20:vale.Annotations:'TODO' left in text
+      test.adoc:75:16:vale.Annotations:'TODO' left in text
+      test.adoc:79:6:vale.Annotations:'NOTE' left in text
+      test.adoc:86:6:vale.Annotations:'NOTE' left in text
+
+  - name: python
+    args: test.py
+    exit: 0
+    want: |
+      test.py:1:3:vale.Annotations:'FIXME' left in text
+      test.py:5:5:vale.Annotations:'FIXME' left in text
+      test.py:11:3:vale.Annotations:'XXX' left in text
+      test.py:13:16:vale.Annotations:'XXX' left in text
+      test.py:14:14:vale.Annotations:'NOTE' left in text
+      test.py:28:5:vale.Annotations:'NOTE' left in text
+      test.py:35:8:vale.Annotations:'NOTE' left in text
+      test.py:37:5:vale.Annotations:'TODO' left in text
+
+  - name: python/shebang
+    about: "#631 -- a shebang names an interpreter, so it isn't a comment"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.py]
+        BasedOnStyles = Test
+      styles/Test/Env.yml: |
+        extends: existence
+        message: "Use 'environment' rather than 'env'."
+        level: error
+        tokens:
+          - env
+      test.py: |
+        #!/usr/bin/env python3
+        # Read the env before starting.
+        print("hello")
+    args: test.py
+    exit: 1
+    want: |
+      test.py:2:12:Test.Env:Use 'environment' rather than 'env'.
+
+  - name: cpp
+    args: test.cc
+    exit: 0
+    want: |
+      test.cc:1:4:vale.Annotations:'XXX' left in text
+      test.cc:9:6:vale.Annotations:'NOTE' left in text
+      test.cc:13:6:vale.Annotations:'XXX' left in text
+      test.cc:17:5:vale.Annotations:'FIXME' left in text
+      test.cc:20:5:vale.Annotations:'XXX' left in text
+      test.cc:23:37:vale.Annotations:'XXX' left in text
+
+  - name: scss
+    about: "#1019 -- SCSS lints like Sass: comments are prose, selectors,
+      values, and strings are code"
+    args: test.scss
+    exit: 0
+    want: |
+      test.scss:1:4:vale.Annotations:'NOTE' left in text
+      test.scss:8:4:vale.Annotations:'XXX' left in text
+      test.scss:18:6:vale.Annotations:'TODO' left in text
+      test.scss:37:50:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+
+  - name: clojure
+    args: test.clj
+    exit: 0
+    want: |
+      test.clj:3:6:vale.Annotations:'NOTE' left in text
+      test.clj:5:15:vale.Annotations:'TODO' left in text
+      test.clj:7:6:vale.Annotations:'FIXME' left in text
+      test.clj:9:11:vale.Annotations:'XXX' left in text
+
+  - name: jsx
+    args: test.jsx
+    exit: 0
+    want: |
+      test.jsx:1:4:vale.Annotations:'XXX' left in text
+      test.jsx:4:6:vale.Annotations:'NOTE' left in text
+      test.jsx:14:3:vale.Annotations:'XXX' left in text
+      test.jsx:18:37:vale.Annotations:'TODO' left in text
+
+  - name: markdown
+    args: test.md
+    exit: 0
+    want: |
+      test.md:3:1:vale.Annotations:'NOTE' left in text
+      test.md:32:1:vale.Annotations:'XXX' left in text
+      test.md:34:29:vale.Annotations:'TODO' left in text
+      test.md:36:3:vale.Annotations:'TODO' left in text
+      test.md:36:10:vale.Annotations:'XXX' left in text
+      test.md:36:16:vale.Annotations:'FIXME' left in text
+      test.md:40:21:vale.Annotations:'FIXME' left in text
+      test.md:44:5:vale.Annotations:'TODO' left in text
+      test.md:46:3:vale.Annotations:'TODO' left in text
+
+  - name: rmarkdown
+    about: .Rmd is Markdown out of the box -- knitr chunk fences and inline
+      `r` spans are code, and everything else lints as prose
+    args: test.Rmd
+    exit: 0
+    want: |
+      test.Rmd:19:47:vale.Annotations:'TODO' left in text
+      test.Rmd:35:25:vale.Annotations:'XXX' left in text
+      test.Rmd:52:23:vale.Annotations:'TODO' left in text
+      test.Rmd:58:32:vale.Annotations:'NOTE' left in text
+    absent:
+      - FIXME
+
+  - name: myst
+    about: "#667 -- MyST-only syntax is markup, not prose: targets, roles,
+      comments, options, and block breaks say nothing, directive content is
+      linted, and literal directives stay skipped"
+    args: test.myst
+    exit: 0
+    want: |
+      test.myst:13:19:vale.Annotations:'TODO' left in text
+      test.myst:29:26:vale.Annotations:'XXX' left in text
+      test.myst:33:19:vale.Annotations:'TODO' left in text
+      test.myst:38:30:vale.Annotations:'XXX' left in text
+      test.myst:46:37:vale.Annotations:'TODO' left in text
+      test.myst:68:31:vale.Annotations:'XXX' left in text
+      test.myst:77:53:vale.Annotations:'TODO' left in text
+      test.myst:84:6:vale.Annotations:'XXX' left in text
+      test.myst:86:23:vale.Annotations:'TODO' left in text
+      test.myst:97:7:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+      - NOTE
+
+  - name: typst
+    about: "#651 -- Typst parses through typst2vast, the compiler's own
+      parser without its evaluator: markup is prose, code mode is masked,
+      and a content block anywhere inside code is prose again"
+    args: test.typ
+    requires: typst2vast
+    exit: 0
+    want: |
+      test.typ:12:27:vale.Annotations:'TODO' left in text
+      test.typ:17:19:vale.Annotations:'TODO' left in text
+      test.typ:17:59:vale.Annotations:'XXX' left in text
+      test.typ:18:22:vale.Annotations:'TODO' left in text
+      test.typ:36:37:vale.Annotations:'TODO' left in text
+      test.typ:40:18:vale.Annotations:'XXX' left in text
+      test.typ:42:22:vale.Annotations:'TODO' left in text
+      test.typ:45:27:vale.Annotations:'XXX' left in text
+      test.typ:48:40:vale.Annotations:'TODO' left in text
+      test.typ:55:29:vale.Annotations:'XXX' left in text
+      test.typ:58:65:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+      - NOTE
+
+  - name: typst-scopes
+    about: Typst's headings, styled spans, raw text, and list items land in
+      their Vale scopes
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.typ]
+        T.Head = YES
+        T.Strong = YES
+        T.Code = YES
+        T.List = YES
+      styles/T/Head.yml: |
+        extends: existence
+        message: heading
+        level: error
+        nonword: true
+        scope: heading
+        raw:
+          - ZQX
+      styles/T/Strong.yml: |
+        extends: existence
+        message: strong
+        level: error
+        nonword: true
+        scope: strong
+        raw:
+          - ZQX
+      styles/T/Code.yml: |
+        extends: existence
+        message: code
+        level: error
+        nonword: true
+        scope: code
+        raw:
+          - ZQX
+      styles/T/List.yml: |
+        extends: existence
+        message: list
+        level: error
+        nonword: true
+        scope: list
+        raw:
+          - ZQX
+      test.typ: |
+        = A heading with ZQX inside
+
+        Plain prose with *a strong ZQX span* and `a raw ZQX span` inline.
+
+        - A list item with ZQX inside.
+    args: test.typ
+    requires: typst2vast
+    exit: 1
+    want: |
+      test.typ:1:18:T.Head:heading
+      test.typ:3:28:T.Strong:strong
+      test.typ:3:49:T.Code:code
+      test.typ:5:20:T.List:list
+
+  - name: qdoc
+    about: "#784 -- QDoc's commands are markup: topic lines, code blocks,
+      links' targets, and options say nothing, while titles, sections,
+      briefs, notes, items, cells, and captions are prose. A command may
+      share the opening `/*!` line; a conditional block's prose, a
+      deprecation's advice, and a summary still count; and modifiers, cell
+      spans, version qualifiers, and snippet markers say nothing"
+    args: test.qdoc
+    exit: 0
+    want: |
+      test.qdoc:3:32:vale.Annotations:'TODO' left in text
+      test.qdoc:5:29:vale.Annotations:'XXX' left in text
+      test.qdoc:7:23:vale.Annotations:'TODO' left in text
+      test.qdoc:8:8:vale.Annotations:'XXX' left in text
+      test.qdoc:10:40:vale.Annotations:'TODO' left in text
+      test.qdoc:14:32:vale.Annotations:'XXX' left in text
+      test.qdoc:17:32:vale.Annotations:'TODO' left in text
+      test.qdoc:25:26:vale.Annotations:'XXX' left in text
+      test.qdoc:30:39:vale.Annotations:'XXX' left in text
+      test.qdoc:33:36:vale.Annotations:'TODO' left in text
+      test.qdoc:36:46:vale.Annotations:'XXX' left in text
+      test.qdoc:38:47:vale.Annotations:'TODO' left in text
+      test.qdoc:48:34:vale.Annotations:'TODO' left in text
+      test.qdoc:67:37:vale.Annotations:'XXX' left in text
+      test.qdoc:69:27:vale.Annotations:'TODO' left in text
+      test.qdoc:73:61:vale.Annotations:'XXX' left in text
+      test.qdoc:78:33:vale.Annotations:'TODO' left in text
+      test.qdoc:97:53:vale.Annotations:'XXX' left in text
+      test.qdoc:99:32:vale.Annotations:'TODO' left in text
+      test.qdoc:100:24:vale.Annotations:'XXX' left in text
+      test.qdoc:105:53:vale.Annotations:'TODO' left in text
+      test.qdoc:108:35:vale.Annotations:'XXX' left in text
+      test.qdoc:108:70:vale.Annotations:'TODO' left in text
+      test.qdoc:113:45:vale.Annotations:'TODO' left in text
+      test.qdoc:116:51:vale.Annotations:'XXX' left in text
+      test.qdoc:120:45:vale.Annotations:'TODO' left in text
+      test.qdoc:122:42:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+      - NOTE
+
+  - name: qdoc-line-accuracy
+    about: an alert keeps its source line through the constructs a real Qt
+      page is built from -- a link split across lines, snippet markers,
+      custom macros, and a snippet reference
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        T.Mark = YES
+      styles/T/Mark.yml: |
+        extends: existence
+        message: "'%s'"
+        level: error
+        nonword: true
+        raw:
+          - MARK[A-E]
+      crosslink.qdoc: |
+        /*!
+            \page qt-edu-for-designers.html
+            \title Qt Edu for Designers
+
+        //! [intro]
+            \e {Qt Edu for Designers} package contains \l {Qt Design Studio Manual}
+            {Qt Design Studio Enterprise}, allowing you to MARKA import.
+        //! [intro]
+
+            These instructions walk you through the installation.
+
+            \include qt-edu-steps.qdocinc {qt-edu-common-steps} {Qt Design Studio}
+
+            \image qt-edu-install-design-studio.png
+
+            With \e {Qt Edu for Designers} license, you get access to Qt Design
+            Studio. Select the \uicontrol {Design Tools} shortcut to install.
+
+            Select \uicontrol {Next}.
+
+            \include qt-edu-steps.qdocinc qt-edu-license-agreement
+
+            \section1 9. Finish the installation
+
+            Select \uicontrol {Install} to start the installation process.
+
+            Once installation is complete, you'll see the screen.
+
+            \image qt-edu-install-finish-design-studio.png
+
+            Select \uicontrol {Finish} to exit the installer.
+
+            \section1 10. Open Qt Design Studio
+
+            Go to the MARKB folder to see the tools that were installed.
+            Qt Design Studio is MARKC located under its own folder.
+        */
+      macros.qdoc: |
+        /*!
+            \class Example
+            \brief A brief description.
+
+            This works on \macos and \linux MARKA platforms.
+            The \QUL framework handles MARKB rendering accordingly.
+            Final sentence after MARKC macros.
+        */
+      markers.qdoc: |
+        /*!
+        //! [intro]
+            Prose line MARKA three.
+        //! [intro]
+
+            Prose line MARKB six.
+        */
+      snippet.qdoc: |
+        /*!
+            \class Loader
+            \brief Loads resources.
+
+            Use the loader as follows:
+            \snippet examples/loader.cpp setup
+            Prose after MARKA snippet should be included.
+        */
+    args: .
+    exit: 1
+    want: |
+      crosslink.qdoc:7:52:T.Mark:'MARKA'
+      crosslink.qdoc:35:15:T.Mark:'MARKB'
+      crosslink.qdoc:36:25:T.Mark:'MARKC'
+      macros.qdoc:5:37:T.Mark:'MARKA'
+      macros.qdoc:6:32:T.Mark:'MARKB'
+      macros.qdoc:7:26:T.Mark:'MARKC'
+      markers.qdoc:3:16:T.Mark:'MARKA'
+      markers.qdoc:6:16:T.Mark:'MARKB'
+      snippet.qdoc:7:17:T.Mark:'MARKA'
+
+  - name: qdoc-toggles
+    about: "`vale off` and `vale on` work in QDoc, as an HTML comment and
+      through `CommentDelimiters`, even though the prose around them may
+      talk about markup"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.qdoc]
+        T.Tok = YES
+        CommentDelimiters = [[, ]]
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s'"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      t.qdoc: |
+        /*!
+            A ZQX before, in a <script> tag sentence.
+
+            <!-- vale off -->
+            A ZQX an HTML comment suppresses.
+            <!-- vale on -->
+
+            [[ vale off ]]
+            A ZQX custom delimiters suppress.
+            [[ vale on ]]
+
+            A ZQX after.
+        */
+    args: t.qdoc
+    exit: 1
+    want: |
+      t.qdoc:2:7:T.Tok:'ZQX'
+      t.qdoc:12:7:T.Tok:'ZQX'
+
+  - name: qdoc-classes
+    about: "`.qdocinc` is QDoc without configuration, and `\\div` and `\\span`
+      carry their class into the scope so a rule can target the prose they
+      hold"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        T.Sidebar = YES
+        T.Header = YES
+      styles/T/Sidebar.yml: |
+        extends: existence
+        message: "'%s' in the sidebar"
+        scope: class.sidebar
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Header.yml: |
+        extends: existence
+        message: "'%s' in a header span"
+        scope: class.vrheader
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      api.qdocinc: |
+        /*!
+            \div {class="sidebar"}
+            A ZQX inside the classed div.
+            \enddiv
+
+            A plain paragraph whose ZQX belongs to neither class.
+
+            The \span {class="vrheader"} {ZQX in a span} is scoped too.
+        */
+    args: api.qdocinc
+    exit: 1
+    want: |
+      api.qdocinc:3:7:T.Sidebar:'ZQX' in the sidebar
+      api.qdocinc:8:35:T.Header:'ZQX' in a header span
+
+  - name: html-data
+    about: "`data` holds machine-readable content in any markup format, not
+      only QDoc: an ordinary rule passes over it"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        T.Prose = YES
+        T.Meta = YES
+      styles/T/Prose.yml: |
+        extends: existence
+        message: "'%s' as prose"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Meta.yml: |
+        extends: existence
+        message: "'%s' as metadata"
+        scope: meta
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      page.html: |
+        <p>A ZQX in a paragraph.</p>
+        <data value="1">ZQX-identifier</data>
+    args: page.html
+    exit: 1
+    want: |
+      page.html:1:6:T.Prose:'ZQX' as prose
+      page.html:2:17:T.Meta:'ZQX' as metadata
+
+  - name: qdoc-meta
+    about: "anchor names and image file names are a document's machine-readable
+      content: an ordinary rule passes over them, and only a rule scoped to
+      `meta` reaches one"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        T.Prose = YES
+        T.Anchor = YES
+        T.Image = YES
+      styles/T/Prose.yml: |
+        extends: existence
+        message: "'%s' as prose"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Anchor.yml: |
+        extends: existence
+        message: "'%s' in an anchor"
+        scope: meta.class.anchor
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Image.yml: |
+        extends: existence
+        message: "'%s' in a file name"
+        scope: meta.class.image
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      anchors.qdoc: |
+        /*!
+            \target ZQX-anchor
+            \keyword {ZQX Keyword}
+
+            A ZQX in ordinary prose.
+
+            \image ZQX-diagram.png A caption with a ZQX in it.
+        */
+    args: anchors.qdoc
+    exit: 1
+    want: |
+      anchors.qdoc:2:13:T.Anchor:'ZQX' in an anchor
+      anchors.qdoc:3:15:T.Anchor:'ZQX' in an anchor
+      anchors.qdoc:5:7:T.Prose:'ZQX' as prose
+      anchors.qdoc:7:12:T.Image:'ZQX' in a file name
+      anchors.qdoc:7:45:T.Prose:'ZQX' as prose
+
+  - name: qdoc-image-alt
+    about: "an image's file name is `meta` whether or not alt text follows, so a
+      rule about naming sees every image; the ones missing alt text carry a
+      second class, so a rule can ask for those alone. See #784."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.qdoc]
+        T.NoAlt = YES
+        T.Name = YES
+      styles/T/NoAlt.yml: |
+        extends: existence
+        message: "'%s' is missing alt text"
+        scope: meta.class.noalt
+        level: error
+        nonword: true
+        raw:
+          - '\S+'
+      styles/T/Name.yml: |
+        extends: existence
+        message: "'%s' is an image"
+        scope: meta.class.image
+        level: suggestion
+        nonword: true
+        raw:
+          - '\S+'
+      images.qdoc: |
+        /*!
+            \image bare.png
+
+            \inlineimage inline-bare.png
+
+            \image described.png A caption of prose.
+
+            \image marked-up.png The \e main toolbar.
+
+            Text with \inlineimage trailing.png and more of the sentence.
+        */
+    args: images.qdoc
+    exit: 1
+    want: |
+      images.qdoc:2:12:T.Name:'bare.png' is an image
+      images.qdoc:2:12:T.NoAlt:'bare.png' is missing alt text
+      images.qdoc:4:18:T.Name:'inline-bare.png' is an image
+      images.qdoc:4:18:T.NoAlt:'inline-bare.png' is missing alt text
+      images.qdoc:6:12:T.Name:'described.png' is an image
+      images.qdoc:8:12:T.Name:'marked-up.png' is an image
+      images.qdoc:10:28:T.Name:'trailing.png' is an image
+
+  - name: qdoc-fragments
+    about: doc comments in C++ sources lint as QDoc through `[formats]`, with
+      alerts mapped back to the source; only `/*!` is documentation, while
+      line comments and plain block comments are code
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        cpp = qdoc
+
+        [*.cpp]
+        T.Tok = YES
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' in a doc comment"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      widget.cpp: |
+        #include "widget.h"
+
+        /*!
+            \fn void Widget::clicked()
+
+            This signal has a ZQX in its prose.
+
+            \note The note has a ZQX too, and \c {a ZQX in code} does not count.
+        */
+        void Widget::clicked() {}
+
+        // A ZQX in a line comment is code, not documentation.
+
+        /*
+            A plain block comment with a ZQX is code too.
+        */
+
+        /****************************************************
+        ** A ZQX in a license header is not documentation.
+        ****************************************************/
+        void Widget::other() {}
+    args: widget.cpp
+    exit: 1
+    want: |
+      widget.cpp:6:23:T.Tok:'ZQX' in a doc comment
+      widget.cpp:8:26:T.Tok:'ZQX' in a doc comment
+
+  - name: qdoc-fragments-raw-scope
+    about: "a `scope: raw` rule reads the whole source of a fragment file, with
+      or without a doc comment in it; each comment is linted in the file's
+      place, and the file is put back before the raw scope runs"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        cpp = qdoc
+
+        [*.cpp]
+        T.Tok = YES
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        scope: raw
+        nonword: true
+        raw:
+          - ZQX
+      code_no_comment.cpp: |
+        #include "widget.h"
+
+        int ZQX_marker_one() { return 0; }
+
+        void Widget::other() {}
+      code_with_comment.cpp: |
+        #include "widget.h"
+
+        int ZQX_marker_one() { return 0; }
+
+        /*!
+            \fn void Widget::clicked()
+
+            Ordinary prose with no marker here.
+        */
+
+        void Widget::other() {}
+    args: .
+    exit: 1
+    want: |
+      code_no_comment.cpp:3:5:T.Tok:'ZQX' found
+      code_with_comment.cpp:3:5:T.Tok:'ZQX' found
+
+  - name: qdocinc-include
+    about: "a `.qdocinc` is an include, not a file of comments: its markup is
+      the body of one, so nothing waits for a `/*!` that the file never
+      writes, and a `//! [name]` marker is still markup"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.qdocinc]
+        T.Tok = YES
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s'"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      steps.qdocinc: |
+        //! [intro]
+            \note A ZQX in an included note.
+        //! [intro]
+
+        A ZQX in an included paragraph.
+      wrapped.qdocinc: |
+        /*!
+            A ZQX in an include that writes the comment out.
+        */
+    args: .
+    exit: 1
+    want: |
+      steps.qdocinc:2:13:T.Tok:'ZQX'
+      steps.qdocinc:5:3:T.Tok:'ZQX'
+      wrapped.qdocinc:2:7:T.Tok:'ZQX'
+
+  - name: qdoc-meta-in-source
+    about: "the same comment lints the same way wherever it is written: an
+      image file name is `meta` in a C++ source as much as in a `.qdoc` file,
+      so an ordinary rule passes over it and a `meta` rule reaches it"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        cpp = qdoc
+
+        [*.{qdoc,cpp}]
+        T.Prose = YES
+        T.Image = YES
+      styles/T/Prose.yml: |
+        extends: existence
+        message: "'%s' as prose"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Image.yml: |
+        extends: existence
+        message: "'%s' in a file name"
+        scope: meta.class.image
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      same.qdoc: |
+        /*!
+            \image ZQX-diagram.png A caption with a ZQX in it.
+        */
+      widget.cpp: |
+        #include "widget.h"
+
+        /*!
+            \image ZQX-diagram.png A caption with a ZQX in it.
+        */
+        void Widget::clicked() {}
+    args: .
+    exit: 1
+    want: |
+      same.qdoc:2:12:T.Image:'ZQX' in a file name
+      same.qdoc:2:45:T.Prose:'ZQX' as prose
+      widget.cpp:4:12:T.Image:'ZQX' in a file name
+      widget.cpp:4:45:T.Prose:'ZQX' as prose
+
+  - name: qml-fragments
+    about: doc comments in QML sources lint as QDoc through `[formats]`;
+      the QML code itself -- objects, bindings, functions, strings, line
+      comments, and snippet markers -- is never prose
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        qml = qdoc
+
+        [*.qml]
+        T.Tok = YES
+        T.Note = YES
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' in a doc comment"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      styles/T/Note.yml: |
+        extends: existence
+        message: "'%s' in a note"
+        scope: class.note
+        level: error
+        nonword: true
+        tokens:
+          - ZQX
+      Slider.qml: |
+        import QtQuick
+
+        /*!
+            \qmltype Slider
+            \inqmlmodule Custom.Controls
+            \brief A ZQX in the brief.
+
+            A ZQX in body prose. Another sentence follows it.
+
+            \section1 A ZQX heading
+
+            \code
+            Slider { value: ZQX }
+            \endcode
+
+            \note A ZQX in a note.
+        */
+        Item {
+            id: root
+
+            //! [0]
+            // A ZQX in a line comment stays code.
+            property real value: 0 // a trailing ZQX comment is code too
+            //! [0]
+
+            /*
+                A ZQX in a plain block comment is code as well.
+            */
+            function formatValue(v) {
+                var label = "a ZQX in a string is code";
+                return label + v;
+            }
+
+            /*!
+                \qmlproperty real Slider::value
+                A second block: its ZQX follows a topic line.
+            */
+        }
+    args: Slider.qml
+    exit: 1
+    want: |
+      Slider.qml:6:14:T.Tok:'ZQX' in a doc comment
+      Slider.qml:8:7:T.Tok:'ZQX' in a doc comment
+      Slider.qml:10:17:T.Tok:'ZQX' in a doc comment
+      Slider.qml:16:13:T.Note:'ZQX' in a note
+      Slider.qml:16:13:T.Tok:'ZQX' in a doc comment
+      Slider.qml:36:29:T.Tok:'ZQX' in a doc comment
+
+  - name: quarto
+    about: "#793 -- fenced divs, attributes, and shortcodes are markup, div
+      content is linted, and code cells stay skipped, options and all"
+    args: test.qmd
+    exit: 0
+    want: |
+      test.qmd:12:19:vale.Annotations:'TODO' left in text
+      test.qmd:23:23:vale.Annotations:'XXX' left in text
+      test.qmd:25:22:vale.Annotations:'TODO' left in text
+      test.qmd:29:23:vale.Annotations:'XXX' left in text
+      test.qmd:35:26:vale.Annotations:'TODO' left in text
+      test.qmd:45:25:vale.Annotations:'XXX' left in text
+      test.qmd:50:60:vale.Annotations:'TODO' left in text
+      test.qmd:53:9:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+      - NOTE
+
+  - name: quarto-callout-scope
+    about: a fenced div's classes scope its content, so a rule can target a
+      callout by name
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.qmd]
+        BasedOnStyles = T
+      styles/T/InCallout.yml: |
+        extends: existence
+        message: "'%s' in a callout"
+        level: error
+        nonword: true
+        scope: class.callout-note
+        raw:
+          - ZQX
+      test.qmd: |
+        A paragraph with ZQX is not matched.
+
+        ::: {.callout-note}
+        First callout paragraph with ZQX.
+
+        Second callout paragraph with ZQX too.
+        :::
+
+        ::: {.callout-tip}
+        A different callout with ZQX.
+        :::
+    args: test.qmd
+    exit: 1
+    want: |
+      test.qmd:4:30:T.InCallout:'ZQX' in a callout
+      test.qmd:6:31:T.InCallout:'ZQX' in a callout
+
+  - name: quarto-math
+    about: "#839 -- inline `$…$` math is skipped like display math, but only
+      under Pandoc's delimiter rules, so `$5 and $10` stays prose"
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.qmd]
+        BasedOnStyles = T
+      styles/T/Tok.yml: |
+        extends: existence
+        message: "'%s' found"
+        level: error
+        nonword: true
+        raw:
+          - ZQX
+      test.qmd: |
+        Inline $ZQX$ is math.
+
+        So is $ZQX = f(ZQX)$, spaces and all.
+
+        And $ZQX =
+        f(ZQX)$ wrapped across lines.
+
+        $$
+        ZQX = f(ZQX)
+        $$
+
+        It costs $5 and ZQX $10 today.
+
+        A lone $5 leaves ZQX alone.
+
+        Escaped \$5 and \$10 leave ZQX alone.
+    args: test.qmd
+    exit: 1
+    want: |
+      test.qmd:12:17:T.Tok:'ZQX' found
+      test.qmd:14:18:T.Tok:'ZQX' found
+      test.qmd:16:28:T.Tok:'ZQX' found
+
+  - name: math-closing-delimiter
+    about: "#1148 -- a closing `$$` need not be alone on its line. Each of
+      these is display math to Pandoc, so the prose after it is still prose,
+      and an unclosed block ends at a blank line instead of consuming the
+      rest of the file"
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.md]
+        BasedOnStyles = Vale
+      single-line.md: |
+        A speling error before the math.
+
+        $$x=1$$
+
+        Another speling error after it.
+      labelled.md: |
+        A speling error before the math.
+
+        $$
+        x=1
+        $$ {#eq-foo}
+
+        Another speling error after it.
+      env.md: |
+        A speling error before the math.
+
+        $$\begin{aligned}
+        x &= 1
+        \end{aligned}$$
+
+        Another speling error after it.
+      unclosed.md: |
+        A speling error before the math.
+
+        $$
+        x=1
+
+        Another speling error after it.
+      adjacent.md: |
+        A speling error before the math.
+
+        $$
+        x = speling
+        $$
+        $$
+        y = 2
+        $$
+
+        Another speling error after it.
+    args: single-line.md labelled.md env.md unclosed.md adjacent.md
+    exit: 1
+    want: |
+      adjacent.md:1:3:Vale.Spelling:Did you really mean 'speling'?
+      adjacent.md:10:9:Vale.Spelling:Did you really mean 'speling'?
+      env.md:1:3:Vale.Spelling:Did you really mean 'speling'?
+      env.md:7:9:Vale.Spelling:Did you really mean 'speling'?
+      labelled.md:1:3:Vale.Spelling:Did you really mean 'speling'?
+      labelled.md:7:9:Vale.Spelling:Did you really mean 'speling'?
+      single-line.md:1:3:Vale.Spelling:Did you really mean 'speling'?
+      single-line.md:5:9:Vale.Spelling:Did you really mean 'speling'?
+      unclosed.md:1:3:Vale.Spelling:Did you really mean 'speling'?
+      unclosed.md:6:9:Vale.Spelling:Did you really mean 'speling'?
+
+  - name: myst-mapped
+    about: a Markdown file opts into MyST with `[formats] md = myst`, and a
+      directive's name scopes its content as a class
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [formats]
+        md = myst
+
+        [*.md]
+        BasedOnStyles = T
+      styles/T/InNote.yml: |
+        extends: existence
+        message: "'%s' in a note"
+        level: error
+        nonword: true
+        scope: class.note
+        raw:
+          - ZQX
+      test.md: |
+        A paragraph with ZQX is not matched.
+
+        (a-label-with-ZQX)=
+
+        ```{note}
+        First note paragraph with ZQX.
+
+        Second note paragraph with ZQX too.
+        ```
+
+        :::{note}
+        A colon-fence note with ZQX.
+        :::
+    args: test.md
+    exit: 1
+    want: |
+      test.md:6:27:T.InNote:'ZQX' in a note
+      test.md:8:28:T.InNote:'ZQX' in a note
+      test.md:12:25:T.InNote:'ZQX' in a note
+
+  - name: assigned-ext
+    about: --ext overrides the extension
+    args: "--ext=.md test.xyz"
+    exit: 0
+    want: |
+      test.xyz:3:1:vale.Annotations:'NOTE' left in text
+      test.xyz:32:1:vale.Annotations:'XXX' left in text
+      test.xyz:34:29:vale.Annotations:'TODO' left in text
+      test.xyz:36:3:vale.Annotations:'TODO' left in text
+      test.xyz:36:10:vale.Annotations:'XXX' left in text
+      test.xyz:36:16:vale.Annotations:'FIXME' left in text
+      test.xyz:40:21:vale.Annotations:'FIXME' left in text
+      test.xyz:44:5:vale.Annotations:'TODO' left in text
+      test.xyz:46:3:vale.Annotations:'TODO' left in text
+
+  - name: mdx
+    args: test.mdx
+    exit: 0
+    want: |
+      test.mdx:13:14:vale.Annotations:'XXX' left in text
+      test.mdx:13:70:vale.Annotations:'TODO' left in text
+      test.mdx:24:1:vale.Annotations:'TODO' left in text
+      test.mdx:34:26:vale.Annotations:'TODO' left in text
+
+  - name: mdx/jsx-children
+    about: "#1155 -- a JSX element's children are Markdown, per MDX's own
+      grammar. They lint at their source positions, scoped by the element's
+      name as a class; attributes and expressions stay code."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        T.Marker = YES
+      styles/T/Marker.yml: |
+        extends: existence
+        message: "'%s' left in text"
+        level: error
+        tokens:
+          - XXX
+      test.mdx: |
+        import { Steps } from "@astrojs/starlight/components";
+
+        <Aside type="info" label="XXX attributes stay code">
+          A colored box holding an XXX marker.
+        </Aside>
+
+        <Steps>
+
+        1. First point here.
+
+        2. Second point, with an XXX marker.
+
+        </Steps>
+
+        An <External>inline XXX marker</External> in a sentence.
+    args: test.mdx
+    exit: 1
+    want: |
+      test.mdx:4:28:T.Marker:'XXX' left in text
+      test.mdx:11:26:T.Marker:'XXX' left in text
+      test.mdx:15:21:T.Marker:'XXX' left in text
+
+  - name: mdx/jsx-children-ignored
+    about: "#1155 -- IgnoredClasses excludes one component's children, since
+      the element's name is their class."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        IgnoredClasses = Aside
+
+        [*.mdx]
+        T.Marker = YES
+      styles/T/Marker.yml: |
+        extends: existence
+        message: "'%s' left in text"
+        level: error
+        tokens:
+          - XXX
+      test.mdx: |
+        <Aside>
+          An ignored XXX marker.
+        </Aside>
+
+        <Steps>
+
+        1. A linted XXX marker.
+
+        </Steps>
+    args: test.mdx
+    exit: 1
+    want: |
+      test.mdx:7:13:T.Marker:'XXX' left in text
+
+  - name: mdx/expression-then-prose
+    about: "#1179 -- a `{...}` expression is a flow expression only when it
+      stands alone on its line. Followed by prose, the line is a paragraph
+      and the expression is inline; a comment renders as one. The expression
+      ends at its closing brace, so a link's `//` after it is prose."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        ---
+        title: t
+        ---
+
+        {/* note */}Thiss paragraph startss with a comment.
+
+        Prose firstt, {/* note */}then a comment mid-line.
+
+        - {/* note */}bullett starting with a comment
+        - normall bullet
+
+        1. {/* note */}numberedd item
+      link.mdx: |
+        ---
+        title: t
+        ---
+
+        {/* note */}See [the docs](https://example.com/docs) for detailss.
+
+        Thiss paragraph is further down the page.
+
+        ## Headingg
+
+        Everythingg after the first paragraph is skipped.
+    args: --output=line --no-exit test.mdx link.mdx
+    exit: 0
+    want: |
+      link.mdx:5:58:Vale.Spelling:Did you really mean 'detailss'?
+      link.mdx:7:1:Vale.Spelling:Did you really mean 'Thiss'?
+      link.mdx:9:4:Vale.Spelling:Did you really mean 'Headingg'?
+      link.mdx:11:1:Vale.Spelling:Did you really mean 'Everythingg'?
+      test.mdx:5:13:Vale.Spelling:Did you really mean 'Thiss'?
+      test.mdx:5:29:Vale.Spelling:Did you really mean 'startss'?
+      test.mdx:7:7:Vale.Spelling:Did you really mean 'firstt'?
+      test.mdx:9:15:Vale.Spelling:Did you really mean 'bullett'?
+      test.mdx:10:3:Vale.Spelling:Did you really mean 'normall'?
+      test.mdx:12:16:Vale.Spelling:Did you really mean 'numberedd'?
+
+  - name: mdx/indented-blocks
+    about: "#1180 -- MDX has no indented code, so a fence, heading, or list
+      indented four or more spaces is what it says, at the top level and
+      under a component that indents its children the way Mintlify and
+      Starlight do."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      fence.mdx: |
+        ---
+        title: t
+        ---
+
+        <Steps>
+          <Step title="Install">
+            Run:
+
+            ```bash
+            npm install
+
+            npx create-next-app
+            ```
+
+            The command creates a projectt directory.
+          </Step>
+        </Steps>
+      top.mdx: |2
+            ## Setupp
+
+            ```bash
+            npm install
+
+            npx create-next-app
+            ```
+
+            - firstt item
+            - secondd item
+    args: --output=line --no-exit fence.mdx top.mdx
+    exit: 0
+    want: |
+      fence.mdx:15:27:Vale.Spelling:Did you really mean 'projectt'?
+      top.mdx:1:8:Vale.Spelling:Did you really mean 'Setupp'?
+      top.mdx:9:7:Vale.Spelling:Did you really mean 'firstt'?
+      top.mdx:10:7:Vale.Spelling:Did you really mean 'secondd'?
+
+  - name: mdx/one-line-elements
+    about: "A JSX element that opens and closes on one line with text
+      between its tags is a paragraph holding an inline element, as MDX
+      reads it, so a callout's text is prose. Without text it stays code."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        <Tip>Thiss suggests a helpful tip</Tip>
+
+        <Badge color="orange">Deprecatedd</Badge> since the lastt release.
+
+        <video src="introo.mp4"></video>
+
+        <Chart data={populationn} />
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:1:6:Vale.Spelling:Did you really mean 'Thiss'?
+      test.mdx:3:23:Vale.Spelling:Did you really mean 'Deprecatedd'?
+      test.mdx:3:53:Vale.Spelling:Did you really mean 'lastt'?
+
+  - name: mdx/located-past-markup
+    about: "An alert is placed by searching the source for its text, and the
+      search skips JSX tags, expressions, ESM, and fenced code. A heading
+      that repeats its element's attribute lands on the heading, a table
+      header repeated after a fence is reported each time, and a heading
+      with a custom-id expression is reported where it is."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*.mdx]
+        BasedOnStyles = Vale
+      test.mdx: |
+        <Update label="x" rss={{ title:"Notificationn preferences" }}>
+
+          ## Notificationn preferences
+
+        </Update>
+
+        | Namee | Type |
+        | --- | --- |
+        | `a` | one |
+
+        ```mdx-code-block
+        <APITable>
+        ```
+
+        | Namee | Type |
+        | --- | --- |
+        | `b` | two |
+
+        ## i18n {/* #i18n */}
+
+        Set the localee here.
+
+        ## Localee {/* #localee */}
+    args: --output=line --no-exit test.mdx
+    exit: 0
+    want: |
+      test.mdx:3:6:Vale.Spelling:Did you really mean 'Notificationn'?
+      test.mdx:7:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.mdx:15:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.mdx:21:9:Vale.Spelling:Did you really mean 'localee'?
+      test.mdx:23:4:Vale.Spelling:Did you really mean 'Localee'?
+
+  - name: repeated-match-after-substring
+    about: "A reported match is masked where it was found. It used to be
+      masked at its first occurrence, which could sit inside another word;
+      the match itself then stayed findable, the next alert with the same
+      text landed on it, and one of the two was dropped as a duplicate."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        Subtitles are fine.
+
+        Say titl here.
+
+        Say titl again.
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:5:Vale.Spelling:Did you really mean 'titl'?
+      test.md:5:5:Vale.Spelling:Did you really mean 'titl'?
+
+  - name: repeated-header-after-code-cell
+    about: "A table cell holding only inline code reaches the walker as a
+      run of mask characters. It is not searched for; it used to be found in
+      a masked info string further down, which moved the cursor past the
+      next table, whose header was then placed at a later copy of itself."
+    files:
+      .vale.ini: |
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale
+      test.md: |
+        | Namee | Type |
+        | --- | --- |
+        | `defaultMode` | one |
+
+        ```js title="docusaurus.config.js"
+        x
+        ```
+
+        | Namee | Type |
+        | --- | --- |
+        | `id` | two |
+
+        | Namee | Type |
+        | --- | --- |
+        | `x` | three |
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:1:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.md:9:3:Vale.Spelling:Did you really mean 'Namee'?
+      test.md:13:3:Vale.Spelling:Did you really mean 'Namee'?
+
+  - name: term-before-autolink-with-later-link
+    about: "#1027 -- a term on an indented line that lazily continues into
+      an autolink, with a Markdown link to the same host later in the
+      file. The term was reported inside the later link's URL; it is
+      reported where it is written."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+        Vocab = en
+
+        [*.md]
+        BasedOnStyles = Vale
+        Vale.Spelling = NO
+      styles/config/vocabularies/en/accept.txt: |
+        GitHub
+      test.md: |
+        # Title
+
+         github:
+        <https://github.com/errata-ai/vale?tab=readme-ov-file>
+
+        [GitHub](https://github.com/errata-ai/vale?tab=readme-ov-file).
+    args: --output=line --no-exit test.md
+    exit: 0
+    want: |
+      test.md:3:2:Vale.Terms:Use 'GitHub' instead of 'github'.
+
+  - name: dita-token-ignores
+    about: "#407 -- ignore patterns apply to DITA. The toolkit reads its
+      input from disk, so the patterns are applied to a copy written
+      beside the source, where its references still resolve."
+    requires: dita
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        TokenIgnores = (\[.+\])
+
+        [*.dita]
+        BasedOnStyles = T
+      styles/T/Rain.yml: |
+        extends: existence
+        message: "found '%s'"
+        level: error
+        tokens:
+          - rains
+      test.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="t1">
+          <title>Weather</title>
+          <body>
+            <p>[if it rains, i will not go] but it rains anyway.</p>
+          </body>
+        </topic>
+    args: --output=line --no-exit test.dita
+    exit: 0
+    want: |
+      test.dita:6:44:T.Rain:found 'rains'
+
+  - name: dita-many-files
+    about: "Every DITA file of a run is converted in one toolkit run, through
+      a map written in their common directory, since starting the toolkit
+      costs more than converting a file. A nested topic and one an ignore
+      pattern changes are converted the same way."
+    requires: dita
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        TokenIgnores = (\[.+\])
+
+        [*.dita]
+        BasedOnStyles = T
+      styles/T/Rain.yml: |
+        extends: existence
+        message: "found '%s'"
+        level: error
+        tokens:
+          - rains
+      docs/a.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="a">
+          <title>A</title>
+          <body>
+            <p>It rains in A.</p>
+          </body>
+        </topic>
+      docs/sub/b.dita: |
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE topic PUBLIC "-//OASIS//DTD DITA Topic//EN" "topic.dtd">
+        <topic id="b">
+          <title>B</title>
+          <body>
+            <p>[if it rains] then it rains in B.</p>
+          </body>
+        </topic>
+    args: --output=line --no-exit docs
+    exit: 0
+    want: |
+      docs/a.dita:6:11:T.Rain:found 'rains'
+      docs/sub/b.dita:6:30:T.Rain:found 'rains'
+
+  - name: url-in-code-comment
+    about: "A URL is never prose. In a code comment it is blanked before
+      the comment is linted, as a converter already keeps one out of the
+      text of a markup file."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale, T
+      styles/T/Any.yml: |
+        extends: existence
+        message: "saw '%s'"
+        level: error
+        tokens:
+          - foobarbaz
+      doc.go: |
+        package x
+
+        // See https://example.com/foobarbaz-qux for detials.
+        var x = 1
+    args: --output=line --no-exit doc.go
+    exit: 0
+    want: |
+      doc.go:3:46:Vale.Spelling:Did you really mean 'detials'?
+
+  - name: rst-url-and-link-text
+    about: "A reStructuredText link's text is linted where it is written,
+      and a bare URL is not linted at all. A spelling alert is placed by
+      the block's own position, so a word in link text is no longer found
+      inside the URL that follows it."
+    requires: rst2html
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        BasedOnStyles = Vale, T
+      styles/T/Any.yml: |
+        extends: existence
+        message: "saw '%s'"
+        level: error
+        tokens:
+          - foobarbaz
+      doc.rst: |
+        See `foobarbaz text <https://example.com/foobarbaz-qux>`_ and https://example.com/foobarbaz-qux here.
+    args: --output=line --no-exit doc.rst
+    exit: 0
+    want: |
+      doc.rst:1:6:T.Any:saw 'foobarbaz'
+      doc.rst:1:6:Vale.Spelling:Did you really mean 'foobarbaz'?
+
+  - name: restructuredtext
+    args: test.rst
+    requires: rst2html
+    exit: 0
+    want: |
+      test.rst:4:34:vale.Annotations:'XXX' left in text
+      test.rst:37:45:vale.Annotations:'TODO' left in text
+      test.rst:58:1:vale.Annotations:'NOTE' left in text
+      test.rst:60:40:vale.Annotations:'TODO' left in text
+      test.rst:63:3:vale.Annotations:'TODO' left in text
+      test.rst:63:29:vale.Annotations:'XXX' left in text
+      test.rst:69:3:vale.Annotations:'FIXME' left in text
+      test.rst:75:3:vale.Annotations:'TODO' left in text
+      test.rst:75:38:vale.Annotations:'XXX' left in text
+      test.rst:81:10:vale.Annotations:'TODO' left in text
+
+  - name: rust
+    args: test.rs
+    exit: 0
+    want: |
+      test.rs:1:5:vale.Annotations:'NOTE' left in text
+      test.rs:3:5:vale.Annotations:'XXX' left in text
+      test.rs:5:17:vale.Annotations:'TODO' left in text
+      test.rs:7:4:vale.Annotations:'FIXME' left in text
+      test.rs:9:5:vale.Annotations:'XXX' left in text
+
+  - name: qml
+    args: test.qml
+    exit: 0
+    want: |
+      test.qml:1:4:vale.Annotations:'NOTE' left in text
+      test.qml:9:4:vale.Annotations:'XXX' left in text
+      test.qml:17:8:vale.Annotations:'TODO' left in text
+      test.qml:23:33:vale.Annotations:'TODO' left in text
+      test.qml:41:16:vale.Annotations:'XXX' left in text
+    absent:
+      - FIXME
+
+  - name: r
+    args: test.r
+    exit: 0
+    want: |
+      test.r:1:3:vale.Annotations:'NOTE' left in text
+      test.r:6:22:vale.Annotations:'XXX' left in text
+
+  - name: perl
+    args: test.pl
+    exit: 0
+    want: |
+      test.pl:2:3:vale.Annotations:'NOTE' left in text
+      test.pl:5:21:vale.Annotations:'XXX' left in text
+      test.pl:8:7:vale.Annotations:'TODO' left in text
+
+  - name: php
+    args: test.php
+    exit: 0
+    want: |
+      test.php:2:31:vale.Annotations:'XXX' left in text
+      test.php:3:8:vale.Annotations:'NOTE' left in text
+      test.php:4:8:vale.Annotations:'FIXME' left in text
+      test.php:6:33:vale.Annotations:'TODO' left in text
+
+  - name: powershell
+    args: test.ps1
+    exit: 0
+    want: |
+      test.ps1:2:24:vale.Annotations:'XXX' left in text
+      test.ps1:4:9:vale.Annotations:'NOTE' left in text
+      test.ps1:5:9:vale.Annotations:'FIXME' left in text
+      test.ps1:8:26:vale.Annotations:'TODO' left in text
+
+  - name: lua
+    args: test.lua
+    exit: 0
+    want: |
+      test.lua:1:4:vale.Annotations:'NOTE' left in text
+      test.lua:2:19:vale.Annotations:'XXX' left in text
+      test.lua:5:7:vale.Annotations:'NOTE' left in text
+      test.lua:9:6:vale.Annotations:'XXX' left in text
+      test.lua:15:4:vale.Annotations:'TODO' left in text
+
+  - name: elixir
+    args: test.ex
+    exit: 0
+    want: |
+      test.ex:3:3:vale.Annotations:'NOTE' left in text
+      test.ex:8:3:vale.Annotations:'FIXME' left in text
+      test.ex:11:5:vale.Annotations:'NOTE' left in text
+      test.ex:12:5:vale.Annotations:'XXX' left in text
+      test.ex:14:9:vale.Annotations:'TODO' left in text
+      test.ex:21:3:vale.Annotations:'XXX' left in text
+      test.ex:27:12:vale.Annotations:'FIXME' left in text
+
+  - name: haskell
+    args: test.hs
+    exit: 0
+    want: |
+      test.hs:2:4:vale.Annotations:'NOTE' left in text
+      test.hs:5:6:vale.Annotations:'TODO' left in text
+      test.hs:6:25:vale.Annotations:'XXX' left in text
+      test.hs:11:41:vale.Annotations:'XXX' left in text
+
+  - name: typescript
+    args: test.ts
+    exit: 0
+    want: |
+      test.ts:1:4:vale.Annotations:'TODO' left in text
+      test.ts:17:4:vale.Annotations:'XXX' left in text
+
+  - name: ruby
+    args: test.rb
+    exit: 0
+    want: |
+      test.rb:2:1:vale.Annotations:'NOTE' left in text
+      test.rb:6:1:vale.Annotations:'XXX' left in text
+      test.rb:9:23:vale.Annotations:'XXX' left in text
+      test.rb:11:3:vale.Annotations:'TODO' left in text
+
+  - name: assigned-format
+    about: "[formats] maps the extension"
+    dir: subdir3
+    args: .
+    exit: 0
+    want: |
+      test.mdx:3:1:vale.Annotations:'NOTE' left in text
+      test.mdx:29:5:vale.Annotations:'XXX' left in text
+      test.mdx:32:1:vale.Annotations:'XXX' left in text
+      test.mdx:34:29:vale.Annotations:'TODO' left in text
+      test.mdx:36:3:vale.Annotations:'TODO' left in text
+      test.mdx:36:10:vale.Annotations:'XXX' left in text
+      test.mdx:36:16:vale.Annotations:'FIXME' left in text
+      test.mdx:40:21:vale.Annotations:'FIXME' left in text
+      test.mdx:44:5:vale.Annotations:'TODO' left in text
+      test.mdx:46:3:vale.Annotations:'TODO' left in text
+
+  - name: comment-delimiters-in-prose
+    about: "A delimiter character inside a comment's prose -- the `//` of a
+      URL, the `#` of a Markdown heading -- is content, not decoration. Every
+      occurrence used to be stripped, shifting each alert after one left by
+      its width."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*]
+        T.Marker = YES
+      styles/T/Marker.yml: |
+        extends: existence
+        message: "'%s' left in text"
+        level: error
+        tokens:
+          - XXX
+      test.go: |
+        package main
+
+        // See https://example.com for XXX details.
+        func main() {}
+      test.py: |
+        # Use the #id selector XXX here.
+        ## A banner comment, XXX included.
+      test.ex: |
+        defmodule M do
+          @moduledoc """
+          Does things.
+
+          ## Examples XXX
+
+              M.run()
+          """
+        end
+    args: test.go test.py test.ex
+    exit: 1
+    want: |
+      test.ex:5:15:T.Marker:'XXX' left in text
+      test.go:3:32:T.Marker:'XXX' left in text
+      test.py:1:24:T.Marker:'XXX' left in text
+      test.py:2:22:T.Marker:'XXX' left in text
+
+  - name: br-separates-text
+    about: "#1157 -- a self-closing `<br/>` arrived as a token type no branch
+      handled, so the text on either side fused: `sentence.<br/><br/>This`
+      read as `sentence.This`, and rules matched across the seam."
+    files:
+      .vale.ini: |
+        StylesPath = styles
+        MinAlertLevel = suggestion
+
+        [*.md]
+        T.Spacing = YES
+      styles/T/Spacing.yml: |
+        extends: existence
+        message: "No space at '%s'."
+        level: error
+        nonword: true
+        tokens:
+          - '[a-z][.?!,][A-Z]'
+      test.md: |
+        A first line.<br/>A second line.
+
+        | Column  | Description |
+        |---------|-------------|
+        | Example | This is the first sentence.<br/><br/>This is the second sentence. |
+
+        A real mistake.Right here.
+    args: test.md
+    exit: 1
+    want: |
+      test.md:7:14:T.Spacing:No space at 'e.R'.

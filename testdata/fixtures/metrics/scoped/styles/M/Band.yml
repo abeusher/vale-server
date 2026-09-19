@@ -1,0 +1,5 @@
+extends: metric
+message: "A sentence of %s words, in the 13-to-19 band."
+scope: sentence
+formula: words
+condition: "> 12 && result < 20"

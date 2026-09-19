@@ -7,8 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"sync"
 
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/adrg/strutil"
+	"github.com/adrg/strutil/metrics"
+
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
 //go:embed data/en_US-web.aff
@@ -96,7 +100,9 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 	}
 
 	for _, entry := range base.dics {
-		c, err := newGoSpell(entry.aff, entry.dic)
+		c, err := sharedDictionary(entry.aff+"\x00"+entry.dic, func() (*goSpell, error) {
+			return newGoSpell(entry.aff, entry.dic)
+		})
 		if err != nil {
 			return &checker, err
 		}
@@ -105,10 +111,9 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 
 	if len(checker.checkers) == 0 || base.load {
 		// use default dictionary ...
-		aff := bytes.NewReader(defaultAff)
-		dic := bytes.NewReader(defaultDic)
-
-		c, err := newGoSpellReader(aff, dic)
+		c, err := sharedDictionary("embedded\x00en_US-web", func() (*goSpell, error) {
+			return newGoSpellReader(bytes.NewReader(defaultAff), bytes.NewReader(defaultDic))
+		})
 		if err != nil {
 			return &checker, err
 		}
@@ -135,6 +140,41 @@ func NewChecker(options ...CheckerOption) (*Checker, error) {
 	return &checker, nil
 }
 
+// Ignored names the `.aff` directives the loaded dictionaries use that the
+// checker does not implement, sorted.
+func (m *Checker) Ignored() []string {
+	seen := map[string]struct{}{}
+	var names []string
+	for _, checker := range m.checkers {
+		for _, name := range checker.ignored {
+			if _, ok := seen[name]; !ok {
+				seen[name] = struct{}{}
+				names = append(names, name)
+			}
+		}
+	}
+	sort.Strings(names)
+	return names
+}
+
+// dictionaries holds each loaded dictionary by its source, so that every
+// spelling rule that names the same files shares one copy.
+var dictionaries sync.Map // key -> *goSpell, pristine
+
+// sharedDictionary returns a checker over the dictionary key names, loading
+// it once.
+func sharedDictionary(key string, load func() (*goSpell, error)) (*goSpell, error) {
+	if pristine, ok := dictionaries.Load(key); ok {
+		return pristine.(*goSpell).fork(), nil //nolint:errcheck // only *goSpell is stored
+	}
+	pristine, err := load()
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := dictionaries.LoadOrStore(key, pristine)
+	return actual.(*goSpell).fork(), nil //nolint:errcheck // only *goSpell is stored
+}
+
 // Spell checks to see if a given word is in the internal dictionaries.
 func (m *Checker) Spell(word string) bool {
 	for _, checker := range m.checkers {
@@ -147,29 +187,55 @@ func (m *Checker) Spell(word string) bool {
 
 // Suggest returns a list of suggestions for a given word.
 func (m *Checker) Suggest(word string) []string {
+	suggestions := []string{}
+	for _, r := range m.Rank(word) {
+		suggestions = append(suggestions, r.Word)
+	}
+	return suggestions
+}
+
+// A Suggestion is a candidate spelling and how close it is to the word, on
+// the scale Similarity uses.
+type Suggestion struct {
+	Word  string
+	Score float64
+}
+
+// Rank returns the closest spellings of word across the dictionaries, best
+// first, at most six.
+func (m *Checker) Rank(word string) []Suggestion {
 	ranks := []wordMatch{}
 	for _, checker := range m.checkers {
 		ranks = append(ranks, checker.suggest(word)...)
 	}
 
-	sort.Slice(ranks, func(i, j int) bool {
+	sort.SliceStable(ranks, func(i, j int) bool {
 		return ranks[i].score > ranks[j].score
 	})
 
-	suggestions := []string{}
+	suggestions := []Suggestion{}
 	for i, r := range ranks {
 		if i > 5 {
 			break
 		}
-		suggestions = append(suggestions, r.word)
+		suggestions = append(suggestions, Suggestion{r.word, r.score})
 	}
-
 	return suggestions
+}
+
+// Similarity is the closeness of two spellings, from 0 to 1, as the
+// suggester measures it.
+func Similarity(a, b string) float64 {
+	return strutil.Similarity(a, b, metrics.NewLevenshtein())
 }
 
 // Dict returns the underlying dictionary for the provided index.
 func (m *Checker) Dict(i int) map[string]struct{} {
-	return m.checkers[i].dict
+	words := make(map[string]struct{}, len(m.checkers[i].roots))
+	for word := range m.checkers[i].roots {
+		words[word] = struct{}{}
+	}
+	return words
 }
 
 // Convert performs character substitutions (ICONV).
@@ -208,10 +274,11 @@ func (m *Checker) readAsset(name string) (string, error) {
 			return option, nil
 		}
 
-		ln, err := os.Readlink(option)
-		if err != nil {
-			return "", err
-		} else if system.FileExists(ln) {
+		// The asset may be a symlink (e.g. a Nix store path exposed via
+		// $DICPATH). A failed Readlink just means this root doesn't have it,
+		// so keep trying the remaining roots instead of bailing out -- the
+		// early return here previously made Vale ignore $DICPATH (#1014).
+		if ln, err := os.Readlink(option); err == nil && system.FileExists(ln) {
 			return ln, nil
 		}
 	}
@@ -240,7 +307,9 @@ func (m *Checker) loadDic(name string) error {
 		return err
 	}
 
-	s, err := newGoSpellReader(aff, dic)
+	s, err := sharedDictionary(affPath+"\x00"+dicPath, func() (*goSpell, error) {
+		return newGoSpellReader(aff, dic)
+	})
 	if err != nil {
 		return err
 	}

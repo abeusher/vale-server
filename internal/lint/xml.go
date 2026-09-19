@@ -6,8 +6,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/errata-ai/vale/v3/internal/core"
-	"github.com/errata-ai/vale/v3/internal/system"
+	"github.com/vale-cli/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/system"
 )
 
 // XML configuration.
@@ -20,7 +20,7 @@ var xsltArgs = []string{
 	"nop",
 }
 
-func (l Linter) lintXML(file *core.File) error {
+func (l *Linter) lintXML(file *core.File) error {
 	var out bytes.Buffer
 	var eut bytes.Buffer
 

@@ -3,33 +3,44 @@ package core
 import (
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+
+	"github.com/vale-cli/vale/v3/internal/glob"
 )
 
+// TestFileSuffixes name the YAML that holds a rule's test cases rather than a
+// rule. `.yml` is the spelling Vale uses elsewhere and the one to document;
+// `.yaml` is accepted so that a configuration written the other way still
+// works.
+//
+// A rule's cases live beside it, which puts them inside the StylesPath: the
+// loader that has to skip them and the runner that has to find them must agree
+// on which is which. See #1122.
+var TestFileSuffixes = []string{".test.yml", ".test.yaml"}
+
+// IsTestFile reports whether a file name holds test cases rather than a rule.
+func IsTestFile(name string) bool {
+	for _, suffix := range TestFileSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
 // CommentsByNormedExt determines what parts of a file we should lint -- e.g.,
-// we only want to lint // or /* comments in a C++ file. Multiple formats are
-// mapped to a single extension (e.g., .java -> .c) because many languages use
-// the same comment delimiters.
+// we only want to lint ; comments in a Clojure file.
 //
 // Deprecated: When possible, we now use tree-sitter grammars to determine the
 // comment delimiters for a given file. See the `lint/code` package for more
 // information.
 //
-// TODO: This should be removed once we have tree-sitter grammars for all
-// languages.
+// Only Clojure (no bundled grammar uses `;` comments) and PowerShell (a
+// stand-in grammar would lose `<# #>` block interiors) remain here.
 var CommentsByNormedExt = map[string]map[string]string{
-	".c": {
-		"inline":     `(?:^|\s)(?:(//.+)|(/\*.+\*/))`,
-		"blockStart": `(/\*.*)`,
-		"blockEnd":   `(.*\*/)`,
-	},
 	".clj": {
 		"inline":     `(;+.+)`,
-		"blockStart": `$^`,
-		"blockEnd":   `$^`,
-	},
-	".r": {
-		"inline":     `(#.+)`,
 		"blockStart": `$^`,
 		"blockEnd":   `$^`,
 	},
@@ -37,21 +48,6 @@ var CommentsByNormedExt = map[string]map[string]string{
 		"inline":     `(#.+)`,
 		"blockStart": `(<#.*)`,
 		"blockEnd":   `(.*#>)`,
-	},
-	".php": {
-		"inline":     `(//.+)|(/\*.+\*/)|(#.+)`,
-		"blockStart": `(/\*.*)`,
-		"blockEnd":   `(.*\*/)`,
-	},
-	".lua": {
-		"inline":     `(-- .+)`,
-		"blockStart": `(-{2,3}\[\[.*)`,
-		"blockEnd":   `(.*\]\])`,
-	},
-	".hs": {
-		"inline":     `(-- .+)`,
-		"blockStart": `(\{-.*)`,
-		"blockEnd":   `(.*-\})`,
 	},
 }
 
@@ -62,36 +58,43 @@ var FormatByExtension = map[string][]string{
 	`\.(?:adoc|asciidoc|asc)$`:                 {".adoc", "markup"},
 	`\.(?:clj|cljs|cljc|cljd)$`:                {".clj", "code"},
 	`\.(?:cpp|cc|c|cp|cxx|c\+\+|h|hpp|h\+\+)$`: {".cpp", "code"},
-	`\.(?:css)$`:                      {".css", "code"},
-	`\.(?:cs|csx)$`:                   {".c", "code"},
-	`\.(?:dita)$`:                     {".dita", "markup"},
-	`\.(?:go)$`:                       {".go", "code"},
-	`\.(?:hs)$`:                       {".hs", "code"},
-	`\.(?:html|htm|shtml|xhtml)$`:     {".html", "markup"},
-	`\.(?:java|bsh)$`:                 {".java", "code"},
-	`\.(?:jl)$`:                       {".jl", "code"},
-	`\.(?:js|jsx)$`:                   {".js", "code"},
-	`\.(?:lua)$`:                      {".lua", "code"},
-	`\.(?:md|mdown|markdown|markdn)$`: {".md", "markup"},
-	`\.(?:mdx)$`:                      {".mdx", "markup"},
-	`\.(?:org)$`:                      {".org", "markup"},
-	`\.(?:php)$`:                      {".php", "code"},
-	`\.(?:pl|pm|pod)$`:                {".r", "code"},
-	`\.(?:proto)$`:                    {".proto", "code"},
-	`\.(?:ps1|psm1|psd1)$`:            {".ps1", "code"},
+	`\.(?:css)$`:                             {".css", "code"},
+	`\.(?:cs|csx)$`:                          {".c", "code"},
+	`\.(?:dita)$`:                            {".dita", "markup"},
+	`\.(?:ex|exs)$`:                          {".ex", "code"},
+	`\.(?:go)$`:                              {".go", "code"},
+	`\.(?:hs)$`:                              {".hs", "code"},
+	`\.(?:html|htm|shtml|xhtml)$`:            {".html", "markup"},
+	`\.(?:ipynb)$`:                           {".ipynb", "markup"},
+	`\.(?:java|bsh)$`:                        {".java", "code"},
+	`\.(?:jl)$`:                              {".jl", "code"},
+	`\.(?:js|jsx)$`:                          {".js", "code"},
+	`\.(?:lua)$`:                             {".lua", "code"},
+	`\.(?:md|mdown|markdown|markdn|[Rr]md)$`: {".md", "markup"},
+	`\.(?:mdx)$`:                             {".mdx", "markup"},
+	`\.(?:myst)$`:                            {".myst", "markup"},
+	`\.(?:qdoc|qdocinc)$`:                    {".qdoc", "markup"},
+	`\.(?:qmd)$`:                             {".qmd", "markup"},
+	`\.(?:qml)$`:                             {".qml", "code"},
+	`\.(?:org)$`:                             {".org", "markup"},
+	`\.(?:php)$`:                             {".php", "code"},
+	`\.(?:pl|pm|pod)$`:                       {".r", "code"},
+	`\.(?:proto)$`:                           {".proto", "code"},
+	`\.(?:ps1|psm1|psd1)$`:                   {".ps1", "code"},
 	`\.(?:rb|Gemfile|Rakefile|Brewfile|gemspec)$`: {".rb", "code"},
-	`\.(?:rs)$`:        {".rs", "code"},
-	`\.(?:rst|rest)$`:  {".rst", "markup"},
-	`\.(?:r|R)$`:       {".r", "code"},
-	`\.(?:sass|less)$`: {".c", "code"},
-	`\.(?:scala|sbt)$`: {".c", "code"},
-	`\.(?:swift)$`:     {".c", "code"},
-	`\.(?:ts|tsx)$`:    {".ts", "code"},
-	`\.(?:txt)$`:       {".txt", "text"},
-	`\.(?:xml|xsd)$`:   {".xml", "markup"},
-	`\.(?:yaml|yml)$`:  {".yml", "data"},
-	`\.(?:json)$`:      {".json", "data"},
-	`\.(?:toml)$`:      {".toml", "data"},
+	`\.(?:rs)$`:             {".rs", "code"},
+	`\.(?:rst|rest)$`:       {".rst", "markup"},
+	`\.(?:r|R)$`:            {".r", "code"},
+	`\.(?:sass|scss|less)$`: {".c", "code"},
+	`\.(?:scala|sbt)$`:      {".c", "code"},
+	`\.(?:swift)$`:          {".c", "code"},
+	`\.(?:ts|tsx)$`:         {".ts", "code"},
+	`\.(?:typ)$`:            {".typ", "markup"},
+	`\.(?:txt)$`:            {".txt", "text"},
+	`\.(?:xml|xsd)$`:        {".xml", "markup"},
+	`\.(?:yaml|yml)$`:       {".yml", "data"},
+	`\.(?:json)$`:           {".json", "data"},
+	`\.(?:toml)$`:           {".toml", "data"},
 }
 
 // FormatFromExt takes a file extension and returns its [normExt, format]
@@ -100,7 +103,7 @@ func FormatFromExt(path string, mapping map[string]string) (string, string) {
 	base := strings.Trim(filepath.Ext(path), ".")
 	kind := getFormat("." + base)
 
-	if format, found := mapping[base]; found {
+	if format, found := formatFor(path, mapping); found {
 		if kind == "code" && getFormat("."+format) == "markup" {
 			// NOTE: This is a special case of embedded markup within code.
 			return "." + format, "fragment"
@@ -123,6 +126,49 @@ func FormatFromExt(path string, mapping map[string]string) (string, string) {
 	}
 
 	return "unknown", "unknown"
+}
+
+// formatFor returns the format `[formats]` maps path to: by its extension,
+// or by a key naming the file or a glob it matches.
+func formatFor(path string, mapping map[string]string) (string, bool) {
+	if format, found := mapping[strings.Trim(filepath.Ext(path), ".")]; found {
+		return format, true
+	}
+
+	keys := make([]string, 0, len(mapping))
+	for k := range mapping {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	name := filepath.Base(path)
+	slashed := filepath.ToSlash(path)
+	for _, k := range keys {
+		if !strings.ContainsAny(k, "*?[{/") {
+			if k == name {
+				return mapping[k], true
+			}
+			continue
+		}
+		pat, err := glob.Compile(k)
+		if err != nil {
+			continue
+		}
+		if pat.Match(name) || pat.Match(slashed) {
+			return mapping[k], true
+		}
+	}
+	return "", false
+}
+
+// NormalizePath returns path with the extension `[formats]` maps it to, so
+// that a section matches the format a file is read as.
+func NormalizePath(path string, mapping map[string]string) string {
+	format, found := formatFor(path, mapping)
+	if !found {
+		return path
+	}
+	return strings.TrimSuffix(path, filepath.Ext(path)) + "." + format
 }
 
 func getFormat(ext string) string {

@@ -8,7 +8,7 @@ import (
 	"github.com/olekukonko/tablewriter/tw"
 	"github.com/pterm/pterm"
 
-	"github.com/errata-ai/vale/v3/internal/core"
+	"github.com/vale-cli/vale/v3/internal/core"
 )
 
 // PrintVerboseAlerts prints Alerts in verbose format.
